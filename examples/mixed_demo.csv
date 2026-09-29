@@ -1,0 +1,6 @@
+name,measurement,category,flag,date
+alpha,1.5,A,True,2026-01-01
+beta,2.5,B,False,2026-01-02
+gamma,,A,True,2026-01-03
+delta,inf,B,False,2026-01-04
+epsilon,-1.0,,True,2026-01-05

@@ -1,0 +1,39 @@
+{
+  "file": "08-test.csv",
+  "python": "3.12.14",
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.39",
+  "dependencies": {
+    "numpy": "2.3.5",
+    "pandas": "2.2.3",
+    "matplotlib": "3.10.8",
+    "customtkinter": "5.2.2"
+  },
+  "seconds": {
+    "load_with_validation": 8.7733,
+    "numeric_summary_all_rows": 0.3007,
+    "correlations_first_four": 0.0164,
+    "filter": 0.0001,
+    "scatter_prepare_all_rows": 0.0022,
+    "scatter_render_setup": 0.0231,
+    "scatter_draw_agg": 0.7018,
+    "scatter_export_png": 0.9187,
+    "histogram_prepare_filtered": 0.0071,
+    "histogram_draw_agg": 0.0502
+  },
+  "peak_rss_before_mib": 78.61,
+  "rows": 200000,
+  "columns": 61,
+  "numeric_columns": 61,
+  "missing": 930,
+  "infinite": 0,
+  "file_mib": 216.68,
+  "dataframe_mib": 93.08,
+  "peak_rss_after_load_mib": 578.06,
+  "load_heartbeat_max_ms": 55.79,
+  "load_heartbeat_p95_ms": 14.39,
+  "selected_after_filter": 100000,
+  "filter_mask_mib": 0.191,
+  "scatter_caption": "Selected 200,000 / 200,000 \u00b7 Usable 200,000 \u00b7 Invalid for this plot 0 \u00b7 Drawn 200,000 + 0 excluded",
+  "histogram_caption": "Selected 100,000 / 200,000 \u00b7 Usable 100,000 \u00b7 In range 100,000 \u00b7 Invalid 0 \u00b7 2,809 bins",
+  "peak_rss_total_mib": 578.06
+}

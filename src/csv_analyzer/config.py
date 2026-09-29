@@ -1,0 +1,14 @@
+"""Shared visual and workflow defaults."""
+
+APP_TITLE = "CSV Analyzer"
+WINDOW_SIZE = "1380x900"
+MIN_WINDOW_SIZE = (1000, 680)
+PREVIEW_ROWS = 200
+BG = "#101821"
+PANEL = "#192530"
+PANEL_ALT = "#213140"
+TEXT = "#E8F0F5"
+MUTED = "#A4B6C5"
+ACCENT = "#3BC8B1"
+ACCENT_HOVER = "#2BAA96"
+WARNING = "#F0BD6C"

@@ -1,0 +1,5 @@
+include README.md PROJECT_BRIEF.md constraints-python312.txt
+recursive-include docs *.md *.json *.png
+recursive-include examples *.csv *.dat
+recursive-include tests *.py
+recursive-include tools *.py
