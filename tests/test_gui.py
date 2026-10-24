@@ -93,8 +93,23 @@ class DesktopTests(unittest.TestCase):
         self.assertIs(first_canvas.toolbar, first_toolbar)
         self.assertTrue({"Home", "Back", "Forward", "Pan", "Zoom"} <= set(first_toolbar._buttons))
 
-        first_canvas.draw_idle()
-        first_canvas._event_loop_id = first_canvas.get_tk_widget().after(
+        # Replot through PlotPanel.show(); the old canvas/toolbar must be fully
+        # detached while the replacement keeps normal navigation available.
+        r.plot()
+        self.finish_jobs()
+        second_canvas = r.panel.canvas
+        second_toolbar = r.panel.toolbar
+        self.assertIsNot(second_canvas, first_canvas)
+        self.assertIsNone(first_canvas.toolbar)
+        self.assertIsNone(first_toolbar.canvas)
+        self.assertIsNone(first_canvas.figure)
+        self.assertIs(second_canvas.toolbar, second_toolbar)
+        self.assertTrue(
+            {"Home", "Back", "Forward", "Pan", "Zoom"} <= set(second_toolbar._buttons)
+        )
+
+        second_canvas.draw_idle()
+        second_canvas._event_loop_id = second_canvas.get_tk_widget().after(
             10_000, lambda: None
         )
         r.panel.clear()
@@ -102,21 +117,14 @@ class DesktopTests(unittest.TestCase):
         self.assertIsNone(r.panel.figure)
         self.assertIsNone(r.panel.canvas)
         self.assertIsNone(r.panel.toolbar)
-        self.assertIsNone(first_canvas.toolbar)
-        self.assertIsNone(first_toolbar.canvas)
-        self.assertIsNone(first_canvas.figure)
-        self.assertIsNone(first_canvas._idle_draw_id)
-        self.assertIsNone(first_canvas._event_loop_id)
+        self.assertIsNone(second_canvas.toolbar)
+        self.assertIsNone(second_toolbar.canvas)
+        self.assertIsNone(second_canvas.figure)
+        self.assertIsNone(second_canvas._idle_draw_id)
+        self.assertIsNone(second_canvas._event_loop_id)
         self.assertEqual(r.panel.export_button.cget("state"), "disabled")
 
         r.panel.clear()  # Idempotent after a complete teardown.
-        r.plot()
-        self.finish_jobs()
-        self.assertIsNot(r.panel.canvas, first_canvas)
-        self.assertIs(r.panel.canvas.toolbar, r.panel.toolbar)
-        self.assertTrue(
-            {"Home", "Back", "Forward", "Pan", "Zoom"} <= set(r.panel.toolbar._buttons)
-        )
 
     def test_close_after_plot(self):
         self.load("scientific_demo.csv")
