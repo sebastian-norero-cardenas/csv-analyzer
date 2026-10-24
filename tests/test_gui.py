@@ -80,6 +80,60 @@ class DesktopTests(unittest.TestCase):
                 self.pump()
         self.assertEqual(self.errors, [])
 
+    def test_plot_panel_clear_replot_and_toolbar_lifecycle(self):
+        self.load("scientific_demo.csv")
+        r = self.app.relationships_tab
+        self.app.tabs.set("Relationships")
+        r.plot()
+        self.finish_jobs()
+
+        first_canvas = r.panel.canvas
+        first_toolbar = r.panel.toolbar
+        self.assertIsNotNone(r.panel.figure)
+        self.assertIs(first_canvas.toolbar, first_toolbar)
+        self.assertTrue({"Home", "Back", "Forward", "Pan", "Zoom"} <= set(first_toolbar._buttons))
+
+        first_canvas.draw_idle()
+        first_canvas._event_loop_id = first_canvas.get_tk_widget().after(
+            10_000, lambda: None
+        )
+        r.panel.clear()
+
+        self.assertIsNone(r.panel.figure)
+        self.assertIsNone(r.panel.canvas)
+        self.assertIsNone(r.panel.toolbar)
+        self.assertIsNone(first_canvas.toolbar)
+        self.assertIsNone(first_toolbar.canvas)
+        self.assertIsNone(first_canvas.figure)
+        self.assertIsNone(first_canvas._idle_draw_id)
+        self.assertIsNone(first_canvas._event_loop_id)
+        self.assertEqual(r.panel.export_button.cget("state"), "disabled")
+
+        r.panel.clear()  # Idempotent after a complete teardown.
+        r.plot()
+        self.finish_jobs()
+        self.assertIsNot(r.panel.canvas, first_canvas)
+        self.assertIs(r.panel.canvas.toolbar, r.panel.toolbar)
+        self.assertTrue(
+            {"Home", "Back", "Forward", "Pan", "Zoom"} <= set(r.panel.toolbar._buttons)
+        )
+
+    def test_close_after_plot(self):
+        self.load("scientific_demo.csv")
+        r = self.app.relationships_tab
+        r.plot()
+        self.finish_jobs()
+        canvas = r.panel.canvas
+
+        self.app.close()
+
+        self.assertTrue(self.app._closed)
+        self.assertIsNone(r.panel.figure)
+        self.assertIsNone(r.panel.canvas)
+        self.assertIsNone(r.panel.toolbar)
+        self.assertIsNone(canvas.toolbar)
+        self.assertEqual(self.errors, [])
+
     def test_four_tabs_filters_figures_and_replacement(self):
         self.load("scientific_demo.csv")
         r, d, s = self.app.relationships_tab, self.app.distributions_tab, self.app.statistics_tab
@@ -109,7 +163,24 @@ class DesktopTests(unittest.TestCase):
         self.assertIsNone(r.panel.figure)
         self.assertIsNone(d.panel.figure)
         self.assertIsNone(s.result)
+
+        # Recreate derived results so dataset replacement exercises teardown
+        # while plots/statistics are active, rather than only after filtering
+        # has already cleared them.
+        r.plot()
+        self.finish_jobs()
+        d.plot()
+        self.finish_jobs()
+        s.compute()
+        self.finish_jobs()
+        self.assertIsNotNone(r.panel.figure)
+        self.assertIsNotNone(d.panel.figure)
+        self.assertIsNotNone(s.result)
+
         self.load("whitespace_demo.dat")
+        self.assertIsNone(r.panel.figure)
+        self.assertIsNone(d.panel.figure)
+        self.assertIsNone(s.result)
         self.assertEqual(tuple(r.x.column.choices), self.app.app_state.dataset.numeric_columns)
         self.assertEqual(r.overlays, ())
         self.assertIsNone(r.inset)
