@@ -75,20 +75,56 @@ class PlotPanel(ctk.CTkFrame):
         self.export_button.configure(state="normal")
 
     def clear(self, message=None):
-        if self.toolbar:
-            self.toolbar.destroy()
-        if self.canvas:
-            # TkAgg schedules draws and event-loop timers on its widget. Cancel
-            # these before destroying it, including when a load invalidates plots.
-            for attribute in ("_idle_draw_id", "_event_loop_id"):
-                callback = getattr(self.canvas, attribute, None)
-                if callback:
-                    self.canvas.get_tk_widget().after_cancel(callback)
-                    setattr(self.canvas, attribute, None)
-            self.canvas.get_tk_widget().destroy()
-        if self.figure:
-            self.figure.clear()
+        figure, canvas, toolbar = self.figure, self.canvas, self.toolbar
         self.figure = self.canvas = self.toolbar = None
+
+        widget = canvas.get_tk_widget() if canvas is not None else None
+        if canvas is not None:
+            # TkAgg can leave delayed draws/event-loop callbacks registered on
+            # the Tk widget. Cancel them before any widget is destroyed.
+            for attribute in ("_idle_draw_id", "_event_loop_id"):
+                callback = getattr(canvas, attribute, None)
+                if callback:
+                    widget.after_cancel(callback)
+                    setattr(canvas, attribute, None)
+
+        if canvas is not None and toolbar is not None:
+            # NavigationToolbar2 registers Matplotlib callbacks on the canvas
+            # and stores itself as canvas.toolbar. Remove both directions before
+            # Figure.clear(), which otherwise calls toolbar.update().
+            for attribute in ("_id_press", "_id_release", "_id_drag"):
+                callback_id = getattr(toolbar, attribute, None)
+                if callback_id is not None:
+                    canvas.mpl_disconnect(callback_id)
+                    setattr(toolbar, attribute, None)
+            for attribute in ("_pan_info", "_zoom_info"):
+                info = getattr(toolbar, attribute, None)
+                callback_id = getattr(info, "cid", None)
+                if callback_id is not None:
+                    canvas.mpl_disconnect(callback_id)
+                setattr(toolbar, attribute, None)
+            if canvas.widgetlock.isowner(toolbar):
+                canvas.widgetlock.release(toolbar)
+            if getattr(canvas, "toolbar", None) is toolbar:
+                canvas.toolbar = None
+            if getattr(toolbar, "canvas", None) is canvas:
+                toolbar.canvas = None
+
+        try:
+            if figure is not None:
+                figure.clear()
+        finally:
+            if figure is not None and getattr(figure, "canvas", None) is canvas:
+                figure.set_canvas(None)
+            try:
+                if toolbar is not None:
+                    toolbar.destroy()
+            finally:
+                if widget is not None:
+                    widget.destroy()
+                if canvas is not None:
+                    canvas.figure = None
+
         self.empty_label.configure(text=message or self.empty_text)
         self.empty_label.grid()
         self.caption.configure(text="Full data · No figure yet", text_color=C.MUTED)
