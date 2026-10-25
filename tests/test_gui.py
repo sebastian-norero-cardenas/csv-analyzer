@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import unittest
+from decimal import Decimal
 from pathlib import Path
 
 from csv_analyzer.app import Application
@@ -17,8 +18,28 @@ from csv_analyzer.ui.dialogs import (
     OverlayDialog,
     StyleDialog,
 )
+from csv_analyzer.ui.widgets import entry_value
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+
+
+class EntryValueTests(unittest.TestCase):
+    class Entry:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+    def test_exact_integer_filter_input_preserves_large_values(self):
+        values = (
+            ("9007199254740993", 9007199254740993),
+            ("9.007199254740993e15", 9007199254740993),
+            ("9007199254740992.5", Decimal("9007199254740992.5")),
+        )
+        for text, expected in values:
+            with self.subTest(text=text):
+                self.assertEqual(entry_value(self.Entry(text), "Bound", exact=True), expected)
 
 
 @unittest.skipIf(
