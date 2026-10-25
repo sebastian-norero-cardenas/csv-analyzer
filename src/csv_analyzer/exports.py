@@ -14,10 +14,18 @@ from .data import DataError
 
 
 @contextmanager
-def atomic_destination(path: str | Path, *, overwrite: bool = False) -> Iterator[Path]:
+def atomic_destination(
+    path: str | Path,
+    *,
+    overwrite: bool = False,
+    destination_resolved: bool = False,
+) -> Iterator[Path]:
     """Publish a complete file without replacing an unapproved destination."""
     requested = Path(path).expanduser()
-    path = requested.resolve() if overwrite else requested.parent.resolve() / requested.name
+    if overwrite:
+        path = requested if destination_resolved else requested.resolve()
+    else:
+        path = requested.parent.resolve() / requested.name
     if not overwrite and os.path.lexists(path):
         raise DataError("This file already exists. Choose another name or confirm replacement.")
     temporary = None
@@ -50,8 +58,13 @@ def export_statistics(frame: pd.DataFrame, path: str | Path, *, overwrite=False)
     resolved = requested.resolve()
     if resolved.suffix.lower() != ".csv":
         raise DataError("Choose a .csv filename for statistics.")
+    publication_path = resolved if overwrite else requested
     try:
-        with atomic_destination(requested, overwrite=overwrite) as temporary:
+        with atomic_destination(
+            publication_path,
+            overwrite=overwrite,
+            destination_resolved=overwrite,
+        ) as temporary:
             frame.to_csv(temporary, index=False, encoding="utf-8")
     except (OSError, ValueError) as exc:
         raise DataError(f"Could not export statistics: {exc}") from exc
