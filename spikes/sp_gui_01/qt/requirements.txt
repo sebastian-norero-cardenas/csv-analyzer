@@ -1,0 +1,2 @@
+# Experimental only; do not merge this dependency into production metadata.
+PySide6==6.12.0
