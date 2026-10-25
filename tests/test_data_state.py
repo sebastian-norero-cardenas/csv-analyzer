@@ -241,6 +241,27 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(ds.frame["scientific"].dropna().tolist(), [1000.0, 2000.0])
         self.assertEqual(ds.frame["mixed"].dropna().tolist(), ["1", "text"])
 
+        safe = load_dataset(
+            self.write(
+                f"x,y\n{2**53 + 2},1\n2.5,2\n,3\n",
+                "mixed_numeric_safe.csv",
+            )
+        )
+        self.assertEqual(str(safe.frame["x"].dtype), "float64")
+        self.assertEqual(int(safe.frame["x"].iloc[0]), 2**53 + 2)
+        self.assertEqual(safe.frame["x"].iloc[1], 2.5)
+
+        with self.assertRaisesRegex(
+            DataError,
+            "mixes floating-point values with integer tokens",
+        ):
+            load_dataset(
+                self.write(
+                    f"x,y\n{2**53 + 1},1\n2.5,2\n,3\n",
+                    "mixed_numeric_unsafe.csv",
+                )
+            )
+
     def test_unrepresentable_nullable_integer_columns_are_rejected(self):
         cases = (
             (
