@@ -319,6 +319,8 @@ class QtSpikeWindow(QMainWindow):
             self.load_path(self._active_path)
 
     def load_path(self, path: Path) -> None:
+        for key in ("filter", "search", "order", "plot"):
+            self.runner.cancel(key)
         ticket = self.model.begin_load()
         options = (
             s200k_import_options()
@@ -436,7 +438,11 @@ class QtSpikeWindow(QMainWindow):
         self._refresh_order_async(event="scope")
 
     def _refresh_order_async(
-        self, *, focus_id: int | None = None, event: str = "sort"
+        self,
+        *,
+        focus_id: int | None = None,
+        event: str = "sort",
+        after=None,
     ) -> None:
         if self.model.dataset is None:
             return
@@ -485,6 +491,8 @@ class QtSpikeWindow(QMainWindow):
             if focus_id is not None:
                 self._focus_source_id(focus_id)
             self._set_status("Ready")
+            if after is not None:
+                after()
 
         self.runner.submit(
             "order", work, success, self._show_error
@@ -605,6 +613,7 @@ class QtSpikeWindow(QMainWindow):
             else self.model.source_ids
         )
         visible = self.model.view.visible_columns
+        sort_snapshot = (self._sort_column, self._sort_descending)
         started = time.perf_counter()
         self._set_status("Searching…")
 
@@ -619,8 +628,8 @@ class QtSpikeWindow(QMainWindow):
                 ids,
                 request,
                 matches,
-                self._sort_column,
-                self._sort_descending,
+                sort_snapshot[0],
+                sort_snapshot[1],
             )
             return matches, nav
 
@@ -640,6 +649,9 @@ class QtSpikeWindow(QMainWindow):
                 f"{len(matches):,} matches"
             )
             self._set_status("Ready")
+            if sort_snapshot != (self._sort_column, self._sort_descending):
+                self._refresh_order_async(event="search_reorder")
+                return
             if matches:
                 self.navigate_match(1)
 
@@ -776,6 +788,8 @@ class QtSpikeWindow(QMainWindow):
                 "Enter a numeric lower-bound filter value."
             )
             return
+        self.runner.cancel("order")
+        self.runner.cancel("search")
         revision = self.model.app_state.revision
         frame = self.model.dataset.frame
         rule = FilterRule(column, lower=value)
@@ -797,10 +811,10 @@ class QtSpikeWindow(QMainWindow):
             )
             self.model.view.dirty_plot = True
             self._mark_plot_outdated()
-            if self.model.view.search is not None:
-                self.run_search()
+            search_active = self.model.view.search is not None
             self._refresh_order_async(
-                event="filter_view"
+                event="filter_view",
+                after=self.run_search if search_active else None,
             )
 
         self.runner.submit(
@@ -814,12 +828,14 @@ class QtSpikeWindow(QMainWindow):
         if self.model.app_state.commit_filters(
             revision, (), None
         ):
+            self.runner.cancel("order")
+            self.runner.cancel("search")
             self.model.view.dirty_plot = True
             self._mark_plot_outdated()
-            if self.model.view.search is not None:
-                self.run_search()
+            search_active = self.model.view.search is not None
             self._refresh_order_async(
-                event="filter_view"
+                event="filter_view",
+                after=self.run_search if search_active else None,
             )
 
     @staticmethod
