@@ -1,4 +1,5 @@
 import tempfile
+from decimal import Decimal
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -78,6 +79,14 @@ class AnalysisTests(unittest.TestCase):
             (FilterRule("id", upper=float(base)), [True, False, False]),
             (FilterRule("id", lower=base + 1), [False, True, True]),
             (FilterRule("id", lower=base + 1, upper=base + 1), [False, True, False]),
+            (
+                FilterRule(
+                    "id",
+                    lower=Decimal("9007199254740992.5"),
+                    upper=Decimal("9007199254740993"),
+                ),
+                [False, True, False],
+            ),
         )
         for rule, expected in cases:
             with self.subTest(rule=rule):
