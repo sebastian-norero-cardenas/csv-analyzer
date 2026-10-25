@@ -236,7 +236,7 @@ class QtSpikeWindow(QMainWindow):
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
         self.table.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectItems
+            QAbstractItemView.SelectionBehavior.SelectRows
         )
         self.table.setVerticalScrollMode(
             QAbstractItemView.ScrollMode.ScrollPerPixel
@@ -738,7 +738,7 @@ class QtSpikeWindow(QMainWindow):
         )
         if not indexes:
             self._set_status(
-                "Select one or more cells/rows to copy."
+                "Select one or more rows to copy."
             )
             return
         lines: list[str] = []
@@ -768,7 +768,7 @@ class QtSpikeWindow(QMainWindow):
             lines.append("\t".join(values))
         QApplication.clipboard().setText("\n".join(lines))
         self._set_status(
-            f"Copied {len(indexes):,} underlying value(s)."
+            f"Copied {len(lines):,} row(s) with underlying values."
         )
 
     def apply_filter(self) -> None:
