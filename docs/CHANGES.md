@@ -1,5 +1,13 @@
 # Refactor and resume record
 
+## Varia Studio identity transition — 2.1.0
+
+- Adopted **Varia Studio** as the canonical public product name.
+- Added `varia-studio` as the canonical CLI while retaining `csv-analyzer` as a legacy alias.
+- Retained the `csv-analyzer-desktop` distribution name, `csv_analyzer` Python namespace,
+  source layout, module entry point and repository name for compatibility.
+- Historical references below are preserved as records of the earlier CSV Analyzer implementation.
+
 ## Starting problems
 
 The prototype coupled parsing, widget mutation and plot configuration across large
