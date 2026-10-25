@@ -116,13 +116,7 @@ def _nullable_integer_candidates(frame: pd.DataFrame) -> list[str]:
     candidates = []
     for name, series in frame.items():
         if is_float_dtype(series.dtype) and series.isna().any():
-            present = series.dropna().to_numpy(dtype=float)
-            if (
-                len(present)
-                and np.isfinite(present).all()
-                and np.equal(present, np.trunc(present)).all()
-            ):
-                candidates.append(name)
+            candidates.append(name)
             continue
         if not is_object_dtype(series.dtype):
             continue
@@ -157,7 +151,8 @@ def _restore_nullable_integer_columns(
         values: list[object] = []
         present: list[int] = []
         missing = False
-        integer_tokens = True
+        all_integer_tokens = True
+        unsafe_float_integer = False
         for value in raw[name]:
             if pd.isna(value):
                 values.append(pd.NA)
@@ -165,8 +160,9 @@ def _restore_nullable_integer_columns(
                 continue
             token = str(value).strip()
             if not _INTEGER_TOKEN.fullmatch(token):
-                integer_tokens = False
-                break
+                all_integer_tokens = False
+                values.append(token)
+                continue
             try:
                 parsed = int(token)
             except ValueError as exc:
@@ -175,7 +171,22 @@ def _restore_nullable_integer_columns(
                 ) from exc
             values.append(parsed)
             present.append(parsed)
-        if not integer_tokens or not missing or not present:
+            try:
+                unsafe_float_integer |= not (
+                    np.isfinite(float(parsed)) and int(float(parsed)) == parsed
+                )
+            except OverflowError:
+                unsafe_float_integer = True
+
+        if not missing or not present:
+            continue
+        if not all_integer_tokens:
+            if is_float_dtype(frame[name].dtype) and unsafe_float_integer:
+                raise DataError(
+                    f"Column {name!r} mixes floating-point values with integer tokens that "
+                    "cannot be represented exactly as float64. Import was stopped to avoid "
+                    "silent numeric corruption."
+                )
             continue
 
         minimum, maximum = min(present), max(present)
