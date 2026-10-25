@@ -31,6 +31,7 @@ class VirtualTreeTable(ctk.CTkFrame):
         self.on_scroll = on_scroll or (lambda seconds: None)
         self.frame: pd.DataFrame | None = None
         self.columns: tuple[str, ...] = ()
+        self._column_positions: dict[str, int] = {}
         self.ordered_ids = np.array([], dtype=np.int64)
         self.offset = 0
         self._slot_ids: dict[str, int] = {}
@@ -68,7 +69,12 @@ class VirtualTreeTable(ctk.CTkFrame):
     ) -> None:
         self.frame = frame
         self.columns = tuple(columns)
-        self.ordered_ids = np.asarray(tuple(ordered_ids), dtype=np.int64)
+        self._column_positions = (
+            {name: int(frame.columns.get_loc(name)) for name in self.columns if name != SOURCE_ROW}
+            if frame is not None
+            else {}
+        )
+        self.ordered_ids = np.asarray(ordered_ids, dtype=np.int64)
         if not keep_position:
             self.offset = 0
         self.offset = min(self.offset, self._max_offset())
@@ -129,12 +135,7 @@ class VirtualTreeTable(ctk.CTkFrame):
 
     def all_selected_source_ids(self) -> tuple[int, ...]:
         self._selected_ids.update(self.selected_source_ids())
-        membership = set(self.ordered_ids.tolist())
-        return tuple(
-            int(item)
-            for item in self.ordered_ids
-            if int(item) in self._selected_ids and int(item) in membership
-        )
+        return tuple(sorted(self._selected_ids))
 
     def focus_source_id(self, source_id: int) -> bool:
         positions = np.flatnonzero(self.ordered_ids == int(source_id))
@@ -186,7 +187,7 @@ class VirtualTreeTable(ctk.CTkFrame):
     def _display_value(self, source_id: int, column: str) -> str:
         if column == SOURCE_ROW:
             return str(source_id)
-        value = self.frame.iloc[source_id - 1][column]
+        value = self.frame.iat[source_id - 1, self._column_positions[column]]
         if pd.isna(value):
             return ""
         if isinstance(value, (bool, np.bool_)):
