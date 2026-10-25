@@ -1,6 +1,6 @@
 """Shared visual and workflow defaults."""
 
-APP_TITLE = "CSV Analyzer"
+APP_TITLE = "Varia Studio"
 WINDOW_SIZE = "1380x900"
 MIN_WINDOW_SIZE = (1000, 680)
 PREVIEW_ROWS = 200

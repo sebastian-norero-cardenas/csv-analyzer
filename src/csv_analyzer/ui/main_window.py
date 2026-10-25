@@ -28,7 +28,7 @@ class MainWindow(ctk.CTk):
         header.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 14))
         brand = ctk.CTkFrame(header, fg_color="transparent")
         brand.pack(side="left")
-        label(brand, "CSV Analyzer", size=29, bold=True).pack(anchor="w")
+        label(brand, C.APP_TITLE, size=29, bold=True).pack(anchor="w")
         label(
             brand, "DATA  /  RELATIONSHIPS  /  DISTRIBUTIONS  /  STATISTICS", size=10, color=C.MUTED
         ).pack(anchor="w", pady=(3, 0))

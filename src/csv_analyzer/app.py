@@ -10,6 +10,7 @@ from tkinter import TclError, filedialog, messagebox
 
 import customtkinter as ctk
 
+from . import config as C
 from .analysis import build_filter_mask
 from .data import CancelledError, DataError, ImportOptions, load_dataset
 from .jobs import TaskRunner
@@ -48,7 +49,7 @@ class Application(MainWindow):
         if not isinstance(error, (DataError, ValueError, OSError)):
             logger.error("Operation failed", exc_info=(type(error), error, error.__traceback__))
         self.set_status(str(error))
-        messagebox.showerror("CSV Analyzer", str(error), parent=parent or self)
+        messagebox.showerror(C.APP_TITLE, str(error), parent=parent or self)
 
     def activity_changed(self, busy):
         if self._closed:
@@ -202,7 +203,9 @@ class Application(MainWindow):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Explore CSV and scientific DAT datasets.")
+    parser = argparse.ArgumentParser(
+        description=f"{C.APP_TITLE}: explore CSV and scientific DAT datasets."
+    )
     parser.add_argument("file", nargs="?", type=Path, help="Dataset to open at startup")
     parser.add_argument("--debug", action="store_true", help="Log diagnostic details to stderr")
     args = parser.parse_args(argv)
