@@ -48,6 +48,22 @@ class ImportTests(unittest.TestCase):
         ds = load_dataset(self.write('label,x\n"a,b",1\n"two\nlines",2\n'))
         self.assertEqual(ds.frame["label"].tolist(), ["a,b", "two\nlines"])
 
+    def test_unicode_nul_is_rejected_in_csv_data_and_headers(self):
+        cases = (
+            ("cell", "name,value\nabc\x00def,1\nxyz,2\n"),
+            ("quoted multiline", 'name,value\n"abc\x00def\nmore",1\nxyz,2\n'),
+            ("header", "na\x00me,value\nabc,1\n"),
+        )
+        for label, text in cases:
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(DataError, "Unicode NUL"):
+                    load_dataset(self.write(text, f"{label.replace(' ', '_')}.csv"))
+
+    def test_utf16_zero_bytes_are_not_mistaken_for_unicode_nul(self):
+        path = self.write("name,value\nalpha,1\nbeta,2\n", "utf16.csv", encoding="utf-16")
+        ds = load_dataset(path, ImportOptions(encoding="utf-16", delimiter=","))
+        self.assertEqual(ds.frame["name"].tolist(), ["alpha", "beta"])
+
     def test_blank_lines_and_quoted_empty_records_are_distinct(self):
         ds = load_dataset(self.write(' \t \nvalue\n   \n""\n"   "\n5\n\t\n'))
         self.assertEqual(len(ds.frame), 3)
