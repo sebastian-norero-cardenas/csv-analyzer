@@ -88,6 +88,7 @@ class AnalysisTests(unittest.TestCase):
         next_one = np.nextafter(1.0, 2.0)
         next_two = np.nextafter(next_one, 2.0)
         next_three = np.nextafter(next_two, 2.0)
+        subnormal = np.nextafter(0.0, 1.0)
         cases = {
             "EA01 dynamic range": [0.0, 1e-100, 2e-100, 1e308],
             "negative dynamic range": [-1e308, -2e-100, -1e-100, 0.0],
@@ -95,6 +96,11 @@ class AnalysisTests(unittest.TestCase):
             "positive near max": [1e308, 1.2e308, 1.4e308, 1.6e308],
             "negative near max": [-1.6e308, -1.4e308, -1.2e308, -1e308],
             "adjacent floats": [1.0, next_one, next_two, next_three],
+            "positive subnormals": [subnormal, 2 * subnormal],
+            "negative subnormals": [-3 * subnormal, -2 * subnormal],
+            "opposite subnormals negative": [-2 * subnormal, subnormal],
+            "opposite subnormals positive": [-subnormal, 2 * subnormal],
+            "subnormal mixed scale": [0.0, subnormal, 2 * subnormal, 1e308],
             "constant": [1e308, 1e308, 1e308, 1e308],
             "one value": [1.2345],
             "two opposite values": [-1e308, 1e308],
