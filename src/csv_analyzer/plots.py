@@ -17,7 +17,7 @@ from matplotlib.ticker import FuncFormatter, ScalarFormatter
 
 from .analysis import numeric_array, selected_mask
 from .data import DataError, check_cancelled
-from .exports import atomic_destination
+from .exports import ExportConflictError, atomic_destination
 
 
 @dataclass(frozen=True)
@@ -594,6 +594,8 @@ def export_figure(
             destination_resolved=overwrite,
         ) as temporary:
             fig.savefig(temporary, format=extension, dpi=dpi, bbox_inches="tight")
+    except ExportConflictError:
+        raise
     except (OSError, ValueError, RuntimeError) as exc:
         raise DataError(f"Could not export the figure: {exc}") from exc
     return resolved
