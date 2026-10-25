@@ -190,6 +190,14 @@ class ImportTests(unittest.TestCase):
                 [False, True, False],
             ),
             (
+                "signed_max.csv",
+                f"id,y\n{2**63 - 2},1\n{2**63 - 1},2\n,3\n",
+                "Int64",
+                [2**63 - 2, 2**63 - 1],
+                FilterRule("id", lower=2**63 - 1),
+                [False, True, False],
+            ),
+            (
                 "unsigned.csv",
                 f"id,y\n{2**63},1\n{2**64 - 1},2\n,3\n",
                 "UInt64",
