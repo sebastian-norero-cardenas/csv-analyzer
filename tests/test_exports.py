@@ -125,10 +125,85 @@ class ExportTests(unittest.TestCase):
                 path.symlink_to(target.name)
             except OSError as exc:
                 self.skipTest(f"Symlinks are unavailable: {exc}")
-            export_statistics(frame, path, overwrite=True)
+            returned = export_statistics(frame, path, overwrite=True)
+            self.assertEqual(returned, target)
             self.assertTrue(path.is_symlink())
             actual = pd.read_csv(target)
             pd.testing.assert_frame_equal(actual, frame)
+
+    def test_statistics_overwrite_publishes_to_once_resolved_symlink_target(self):
+        frame = pd.DataFrame({"x": [7.25]})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target_a = root / "A.csv"
+            target_b = root / "B.csv"
+            alias = root / "alias.csv"
+            target_a.write_text("A original")
+            target_b.write_text("B original")
+            try:
+                alias.symlink_to(target_a.name)
+            except OSError as exc:
+                self.skipTest(f"Symlinks are unavailable: {exc}")
+
+            original_resolve = Path.resolve
+            switched = False
+
+            def racing_resolve(path, *args, **kwargs):
+                nonlocal switched
+                resolved = original_resolve(path, *args, **kwargs)
+                if path == alias and not switched:
+                    alias.unlink()
+                    alias.symlink_to(target_b.name)
+                    switched = True
+                return resolved
+
+            with patch.object(Path, "resolve", new=racing_resolve):
+                returned = export_statistics(frame, alias, overwrite=True)
+
+            self.assertEqual(returned, target_a)
+            actual = pd.read_csv(target_a)
+            pd.testing.assert_frame_equal(actual, frame)
+            self.assertEqual(target_b.read_text(), "B original")
+            self.assertEqual(alias.resolve(), target_b)
+            self.assertEqual(set(root.iterdir()), {target_a, target_b, alias})
+
+    def test_figure_overwrite_publishes_to_once_resolved_symlink_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target_a = root / "A.png"
+            target_b = root / "B.png"
+            alias = root / "alias.png"
+            target_a.write_bytes(b"A original")
+            target_b.write_bytes(b"B original")
+            try:
+                alias.symlink_to(target_a.name)
+            except OSError as exc:
+                self.skipTest(f"Symlinks are unavailable: {exc}")
+
+            original_resolve = Path.resolve
+            switched = False
+
+            def racing_resolve(path, *args, **kwargs):
+                nonlocal switched
+                resolved = original_resolve(path, *args, **kwargs)
+                if path == alias and not switched:
+                    alias.unlink()
+                    alias.symlink_to(target_b.name)
+                    switched = True
+                return resolved
+
+            class Figure:
+                def savefig(self, temporary, **kwargs):
+                    Path(temporary).write_bytes(b"figure export")
+
+            with patch.object(Path, "resolve", new=racing_resolve):
+                returned = export_figure(Figure(), alias, overwrite=True)
+
+            self.assertEqual(returned, target_a)
+            self.assertEqual(target_a.read_bytes(), b"figure export")
+            self.assertEqual(target_b.read_bytes(), b"B original")
+            self.assertEqual(alias.resolve(), target_b)
+            self.assertEqual(set(root.iterdir()), {target_a, target_b, alias})
 
     def test_failed_figure_export_does_not_replace_previous_file(self):
         class BrokenFigure:
