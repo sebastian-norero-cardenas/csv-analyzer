@@ -4,6 +4,11 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - Linux is the primary spike target
+    resource = None
 from pathlib import Path
 from tkinter import TclError, filedialog, messagebox
 
@@ -805,6 +810,8 @@ class CtkSpikeApp(ctk.CTk):
         self.cancel_button.configure(
             state="normal" if busy else "disabled"
         )
+        if not busy:
+            self._record_now("settled")
 
     def cancel_job(self, key: str) -> None:
         started = time.perf_counter()
@@ -883,6 +890,11 @@ class CtkSpikeApp(ctk.CTk):
                     "toolkit": "CTk/ttk",
                     "dataset": str(self._active_path or ""),
                     "candidate": "SP-GUI-01",
+                    "peak_rss_kib": (
+                        int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+                        if resource is not None
+                        else None
+                    ),
                 },
             )
         self.jobs.close()
