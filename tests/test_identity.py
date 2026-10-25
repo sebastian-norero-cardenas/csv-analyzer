@@ -47,6 +47,7 @@ class IdentityTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Varia Studio", result.stdout)
         self.assertIn("[-h]", result.stdout)
         self.assertIn("[--debug]", result.stdout)
         self.assertIn("[file]", result.stdout)
