@@ -172,8 +172,9 @@ def _restore_nullable_integer_columns(
             values.append(parsed)
             present.append(parsed)
             try:
+                as_float = float(parsed)
                 unsafe_float_integer |= not (
-                    np.isfinite(float(parsed)) and int(float(parsed)) == parsed
+                    np.isfinite(as_float) and int(as_float) == parsed
                 )
             except OverflowError:
                 unsafe_float_integer = True
