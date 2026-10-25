@@ -132,6 +132,45 @@ class AnalysisTests(unittest.TestCase):
             [True, False, False],
         )
 
+    def test_extreme_finite_filter_bounds_are_type_aware(self):
+        huge = 10**400
+        decimal_huge = Decimal("1e400")
+        signed = pd.DataFrame({"id": np.array([-2, 0, 2], dtype=np.int64)})
+        unsigned = pd.DataFrame({"id": np.array([0, 2], dtype=np.uint64)})
+
+        for bound in (huge, decimal_huge):
+            with self.subTest(bound=bound, side="upper"):
+                self.assertEqual(
+                    build_filter_mask(signed, (FilterRule("id", upper=bound),)).tolist(),
+                    [True, True, True],
+                )
+            with self.subTest(bound=bound, side="lower"):
+                self.assertEqual(
+                    build_filter_mask(signed, (FilterRule("id", lower=bound),)).tolist(),
+                    [False, False, False],
+                )
+
+        for bound in (-huge, Decimal("-1e400")):
+            with self.subTest(bound=bound, side="lower"):
+                self.assertEqual(
+                    build_filter_mask(signed, (FilterRule("id", lower=bound),)).tolist(),
+                    [True, True, True],
+                )
+            with self.subTest(bound=bound, side="upper"):
+                self.assertEqual(
+                    build_filter_mask(signed, (FilterRule("id", upper=bound),)).tolist(),
+                    [False, False, False],
+                )
+
+        self.assertEqual(
+            build_filter_mask(unsigned, (FilterRule("id", lower=-huge),)).tolist(),
+            [True, True],
+        )
+        self.assertEqual(
+            build_filter_mask(unsigned, (FilterRule("id", upper=huge),)).tolist(),
+            [True, True],
+        )
+
     def test_bad_filters(self):
         for rule in (
             FilterRule("group", 1),
@@ -139,6 +178,9 @@ class AnalysisTests(unittest.TestCase):
             FilterRule("x"),
             FilterRule("x", 4, 2),
             FilterRule("x", np.nan),
+            FilterRule("x", Decimal("NaN")),
+            FilterRule("x", Decimal("Infinity")),
+            FilterRule("x", "3"),
         ):
             with self.subTest(rule=rule), self.assertRaises(DataError):
                 build_filter_mask(self.frame, (rule,))
