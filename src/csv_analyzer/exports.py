@@ -17,7 +17,7 @@ from .data import DataError
 def atomic_destination(path: str | Path, *, overwrite: bool = False) -> Iterator[Path]:
     """Publish a complete file without replacing an unapproved destination."""
     requested = Path(path).expanduser()
-    path = requested.resolve() if overwrite else Path(os.path.abspath(requested))
+    path = requested.resolve() if overwrite else requested.parent.resolve() / requested.name
     if not overwrite and os.path.lexists(path):
         raise DataError("This file already exists. Choose another name or confirm replacement.")
     temporary = None
