@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from dataclasses import replace
-from decimal import Decimal
+from decimal import ROUND_FLOOR, Decimal, localcontext
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +28,25 @@ from csv_analyzer.plots import (
     render_scatter,
 )
 from csv_analyzer.state import FilterRule
+
+
+def reference_linear_quantiles(values):
+    """Independent high-precision oracle for float inputs and linear quantiles."""
+    with localcontext() as context:
+        context.prec = 1200
+        ordered = sorted(Decimal.from_float(float(value)) for value in values)
+        result = []
+        for quantile in (Decimal("0.25"), Decimal("0.5"), Decimal("0.75")):
+            position = Decimal(len(ordered) - 1) * quantile
+            lower = int(position.to_integral_value(rounding=ROUND_FLOOR))
+            upper = min(lower + 1, len(ordered) - 1)
+            fraction = position - Decimal(lower)
+            value = (
+                ordered[lower] * (Decimal(1) - fraction)
+                + ordered[upper] * fraction
+            )
+            result.append(float(value))
+        return result
 
 
 class AnalysisTests(unittest.TestCase):
@@ -64,6 +83,49 @@ class AnalysisTests(unittest.TestCase):
         result = numeric_summary(pd.DataFrame({"x": [1e308, 1e308]})).iloc[0]
         self.assertEqual(result["Mean"], 1e308)
         self.assertEqual(result["Std"], 0)
+
+    def test_extreme_linear_quantiles_match_high_precision_reference(self):
+        next_one = np.nextafter(1.0, 2.0)
+        next_two = np.nextafter(next_one, 2.0)
+        next_three = np.nextafter(next_two, 2.0)
+        subnormal = np.nextafter(0.0, 1.0)
+        cases = {
+            "EA01 dynamic range": [0.0, 1e-100, 2e-100, 1e308],
+            "negative dynamic range": [-1e308, -2e-100, -1e-100, 0.0],
+            "opposite extremes": [-1.7e308, -1e308, 1e308, 1.7e308],
+            "positive near max": [1e308, 1.2e308, 1.4e308, 1.6e308],
+            "negative near max": [-1.6e308, -1.4e308, -1.2e308, -1e308],
+            "adjacent floats": [1.0, next_one, next_two, next_three],
+            "positive subnormals": [subnormal, 2 * subnormal],
+            "negative subnormals": [-3 * subnormal, -2 * subnormal],
+            "opposite subnormals negative": [-2 * subnormal, subnormal],
+            "opposite subnormals positive": [-subnormal, 2 * subnormal],
+            "subnormal mixed scale": [0.0, subnormal, 2 * subnormal, 1e308],
+            "constant": [1e308, 1e308, 1e308, 1e308],
+            "one value": [1.2345],
+            "two opposite values": [-1e308, 1e308],
+            "three opposite values": [-1e308, 0.0, 1e308],
+        }
+        for label, values in cases.items():
+            with self.subTest(label=label):
+                expected = reference_linear_quantiles(values)
+                row = numeric_summary(pd.DataFrame({"x": values})).iloc[0]
+                actual = [row["Q1"], row["Median"], row["Q3"]]
+                np.testing.assert_array_equal(actual, expected)
+
+    def test_extreme_quantiles_do_not_change_other_summary_semantics(self):
+        frame = pd.DataFrame({"x": [0.0, 1e-100, 2e-100, 1e308, np.nan, np.inf]})
+        row = numeric_summary(frame).iloc[0]
+        self.assertEqual(row["Rows"], 6)
+        self.assertEqual(row["Valid"], 4)
+        self.assertEqual(row["Missing"], 1)
+        self.assertEqual(row["Infinite"], 1)
+        self.assertEqual(row["Mean"], 2.5e307)
+        self.assertEqual(row["Std"], 5e307)
+        self.assertTrue(np.isinf(row["Variance"]))
+        self.assertEqual(row["Min"], 0.0)
+        self.assertEqual(row["Max"], 1e308)
+        self.assertEqual(row["ddof"], 1)
 
     def test_filters_raw_inclusive_and_finite(self):
         mask = build_filter_mask(self.frame, (FilterRule("x", 2, 4), FilterRule("y", None, 6)))

@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import threading
 from decimal import Decimal
+from fractions import Fraction
 
 import numpy as np
 import pandas as pd
@@ -107,6 +108,31 @@ def build_filter_mask(
     return mask
 
 
+def _linear_interpolate(a: float, b: float, numerator: int) -> float:
+    if numerator == 0 or a == b:
+        return float(a)
+    left = Fraction.from_float(float(a))
+    right = Fraction.from_float(float(b))
+    return float(((4 - numerator) * left + numerator * right) / 4)
+
+
+def _linear_quartiles(values: np.ndarray) -> tuple[float, float, float]:
+    """Q1/median/Q3 using exact quartile positions and one final float rounding."""
+    n = len(values)
+    positions = []
+    indices = []
+    for numerator in (1, 2, 3):
+        lower, remainder = divmod((n - 1) * numerator, 4)
+        upper = lower if remainder == 0 else lower + 1
+        positions.append((lower, upper, remainder))
+        indices.extend((lower, upper))
+    partitioned = np.partition(values, np.unique(indices))
+    return tuple(
+        _linear_interpolate(partitioned[lower], partitioned[upper], numerator)
+        for lower, upper, numerator in positions
+    )
+
+
 def numeric_summary(
     frame: pd.DataFrame,
     mask: np.ndarray | None = None,
@@ -144,10 +170,10 @@ def numeric_summary(
             "ddof": ddof,
         }
         if n:
-            # Scaling avoids spurious intermediate overflow in mean/quantiles/std.
+            q1, median, q3 = _linear_quartiles(values)
+            # Scaling avoids spurious intermediate overflow in mean/std.
             scale = float(np.max(np.abs(values))) or 1.0
             scaled = values / scale
-            q1, median, q3 = np.quantile(scaled, [0.25, 0.5, 0.75], method="linear") * scale
             with np.errstate(over="ignore", invalid="ignore"):
                 std = float(np.std(scaled, ddof=ddof) * scale) if n > ddof else np.nan
                 variance = float(np.square(std))
