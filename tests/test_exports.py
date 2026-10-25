@@ -1,6 +1,8 @@
+import errno
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -22,6 +24,85 @@ class ExportTests(unittest.TestCase):
                 export_statistics(result, path)
             export_statistics(result, path, overwrite=True)
 
+    def test_no_overwrite_race_preserves_concurrent_destination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "race.csv"
+            with self.assertRaisesRegex(DataError, "created while|already exists"):
+                with atomic_destination(path, overwrite=False) as temporary:
+                    temporary.write_text("export")
+                    path.write_text("created by another writer")
+            self.assertEqual(path.read_text(), "created by another writer")
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_statistics_no_overwrite_race_preserves_other_writer(self):
+        frame = pd.DataFrame({"x": [1.25, 2.5]})
+        original_to_csv = pd.DataFrame.to_csv
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "summary.csv"
+
+            def racing_to_csv(self, temporary, *args, **kwargs):
+                original_to_csv(self, temporary, *args, **kwargs)
+                path.write_text("created by another writer")
+
+            with patch.object(pd.DataFrame, "to_csv", new=racing_to_csv):
+                with self.assertRaisesRegex(DataError, "created while|already exists"):
+                    export_statistics(frame, path)
+            self.assertEqual(path.read_text(), "created by another writer")
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_figure_no_overwrite_race_preserves_other_writer(self):
+        for suffix in ("png", "pdf", "svg"):
+            with self.subTest(suffix=suffix), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / f"plot.{suffix}"
+
+                class RacingFigure:
+                    def savefig(self, temporary, **kwargs):
+                        Path(temporary).write_bytes(b"complete export")
+                        path.write_bytes(b"created by another writer")
+
+                with self.assertRaisesRegex(DataError, "created while|already exists"):
+                    export_figure(RacingFigure(), path)
+                self.assertEqual(path.read_bytes(), b"created by another writer")
+                self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_no_overwrite_rejects_existing_and_dangling_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target.csv"
+            existing = root / "existing.csv"
+            dangling = root / "dangling.csv"
+            target.write_text("original")
+            try:
+                existing.symlink_to(target.name)
+                dangling.symlink_to("missing.csv")
+            except OSError as exc:
+                self.skipTest(f"Symlinks are unavailable: {exc}")
+
+            with self.assertRaisesRegex(DataError, "already exists"):
+                export_statistics(pd.DataFrame({"x": [1]}), existing)
+            with self.assertRaisesRegex(DataError, "already exists"):
+                export_statistics(pd.DataFrame({"x": [1]}), dangling)
+
+            self.assertEqual(target.read_text(), "original")
+            self.assertTrue(existing.is_symlink())
+            self.assertTrue(dangling.is_symlink())
+            self.assertFalse((root / "missing.csv").exists())
+            self.assertEqual(set(root.iterdir()), {target, existing, dangling})
+
+    def test_no_overwrite_unsupported_publication_is_safe_and_clean(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "summary.csv"
+            with patch(
+                "csv_analyzer.exports.os.link",
+                side_effect=OSError(errno.EOPNOTSUPP, "hard links unsupported"),
+            ):
+                with self.assertRaisesRegex(DataError, "safely publish"):
+                    with atomic_destination(path, overwrite=False) as temporary:
+                        temporary.write_text("complete export")
+            self.assertFalse(path.exists())
+            self.assertEqual(list(root.iterdir()), [])
+
     def test_failed_write_preserves_destination_and_cleans_temporary_file(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "existing.csv"
@@ -32,6 +113,97 @@ class ExportTests(unittest.TestCase):
                     raise OSError("simulated disk failure")
             self.assertEqual(path.read_text(), "original")
             self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_overwrite_true_preserves_symlink_target_semantics(self):
+        frame = pd.DataFrame({"x": [3.5]})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target.csv"
+            path = root / "alias.csv"
+            target.write_text("original")
+            try:
+                path.symlink_to(target.name)
+            except OSError as exc:
+                self.skipTest(f"Symlinks are unavailable: {exc}")
+            returned = export_statistics(frame, path, overwrite=True)
+            self.assertEqual(returned, target)
+            self.assertTrue(path.is_symlink())
+            actual = pd.read_csv(target)
+            pd.testing.assert_frame_equal(actual, frame)
+
+    def test_statistics_overwrite_publishes_to_once_resolved_symlink_target(self):
+        frame = pd.DataFrame({"x": [7.25]})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target_a = root / "A.csv"
+            target_b = root / "B.csv"
+            alias = root / "alias.csv"
+            target_a.write_text("A original")
+            target_b.write_text("B original")
+            try:
+                alias.symlink_to(target_a.name)
+            except OSError as exc:
+                self.skipTest(f"Symlinks are unavailable: {exc}")
+
+            original_resolve = Path.resolve
+            switched = False
+
+            def racing_resolve(path, *args, **kwargs):
+                nonlocal switched
+                resolved = original_resolve(path, *args, **kwargs)
+                if path == alias and not switched:
+                    alias.unlink()
+                    alias.symlink_to(target_b.name)
+                    switched = True
+                return resolved
+
+            with patch.object(Path, "resolve", new=racing_resolve):
+                returned = export_statistics(frame, alias, overwrite=True)
+
+            self.assertEqual(returned, target_a)
+            actual = pd.read_csv(target_a)
+            pd.testing.assert_frame_equal(actual, frame)
+            self.assertEqual(target_b.read_text(), "B original")
+            self.assertEqual(alias.resolve(), target_b)
+            self.assertEqual(set(root.iterdir()), {target_a, target_b, alias})
+
+    def test_figure_overwrite_publishes_to_once_resolved_symlink_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target_a = root / "A.png"
+            target_b = root / "B.png"
+            alias = root / "alias.png"
+            target_a.write_bytes(b"A original")
+            target_b.write_bytes(b"B original")
+            try:
+                alias.symlink_to(target_a.name)
+            except OSError as exc:
+                self.skipTest(f"Symlinks are unavailable: {exc}")
+
+            original_resolve = Path.resolve
+            switched = False
+
+            def racing_resolve(path, *args, **kwargs):
+                nonlocal switched
+                resolved = original_resolve(path, *args, **kwargs)
+                if path == alias and not switched:
+                    alias.unlink()
+                    alias.symlink_to(target_b.name)
+                    switched = True
+                return resolved
+
+            class Figure:
+                def savefig(self, temporary, **kwargs):
+                    Path(temporary).write_bytes(b"figure export")
+
+            with patch.object(Path, "resolve", new=racing_resolve):
+                returned = export_figure(Figure(), alias, overwrite=True)
+
+            self.assertEqual(returned, target_a)
+            self.assertEqual(target_a.read_bytes(), b"figure export")
+            self.assertEqual(target_b.read_bytes(), b"B original")
+            self.assertEqual(alias.resolve(), target_b)
+            self.assertEqual(set(root.iterdir()), {target_a, target_b, alias})
 
     def test_failed_figure_export_does_not_replace_previous_file(self):
         class BrokenFigure:

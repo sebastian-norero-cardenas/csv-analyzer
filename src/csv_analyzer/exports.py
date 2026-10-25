@@ -14,17 +14,39 @@ from .data import DataError
 
 
 @contextmanager
-def atomic_destination(path: str | Path, *, overwrite: bool = False) -> Iterator[Path]:
-    """Publish a complete file, leaving an existing destination intact on failure."""
-    path = Path(path).expanduser().resolve()
-    if path.exists() and not overwrite:
+def atomic_destination(
+    path: str | Path,
+    *,
+    overwrite: bool = False,
+    destination_resolved: bool = False,
+) -> Iterator[Path]:
+    """Publish a complete file without replacing an unapproved destination."""
+    requested = Path(path).expanduser()
+    if overwrite:
+        path = requested if destination_resolved else requested.resolve()
+    else:
+        path = requested.parent.resolve() / requested.name
+    if not overwrite and os.path.lexists(path):
         raise DataError("This file already exists. Choose another name or confirm replacement.")
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(dir=path.parent, suffix=path.suffix, delete=False) as file:
             temporary = Path(file.name)
         yield temporary
-        os.replace(temporary, path)
+        if overwrite:
+            os.replace(temporary, path)
+        else:
+            try:
+                os.link(temporary, path)
+            except FileExistsError as exc:
+                raise DataError(
+                    "This file was created while the export was being prepared. "
+                    "Nothing was overwritten; choose another name or confirm replacement."
+                ) from exc
+            except OSError as exc:
+                raise DataError(
+                    f"Could not safely publish without overwriting on this filesystem: {exc}"
+                ) from exc
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
@@ -32,12 +54,18 @@ def atomic_destination(path: str | Path, *, overwrite: bool = False) -> Iterator
 
 def export_statistics(frame: pd.DataFrame, path: str | Path, *, overwrite=False) -> Path:
     """UTF-8 CSV with headers, full computed precision, and no generated index."""
-    path = Path(path).expanduser().resolve()
-    if path.suffix.lower() != ".csv":
+    requested = Path(path).expanduser()
+    resolved = requested.resolve()
+    if resolved.suffix.lower() != ".csv":
         raise DataError("Choose a .csv filename for statistics.")
+    publication_path = resolved if overwrite else requested
     try:
-        with atomic_destination(path, overwrite=overwrite) as temporary:
+        with atomic_destination(
+            publication_path,
+            overwrite=overwrite,
+            destination_resolved=overwrite,
+        ) as temporary:
             frame.to_csv(temporary, index=False, encoding="utf-8")
     except (OSError, ValueError) as exc:
         raise DataError(f"Could not export statistics: {exc}") from exc
-    return path
+    return resolved
