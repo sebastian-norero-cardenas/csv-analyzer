@@ -91,6 +91,42 @@ class CoordinatorTests(unittest.TestCase):
             self.assertEqual(app.app_state.filters, filters)
             self.assertEqual(app.app_state.revision, revision)
 
+    def test_unsafe_nullable_integer_import_preserves_active_state(self):
+        app = Coordinator()
+        self.addCleanup(app.jobs.close)
+
+        def drain():
+            deadline = time.monotonic() + 5
+            while app.jobs.jobs and time.monotonic() < deadline:
+                app.jobs.poll()
+                time.sleep(0.005)
+            self.assertFalse(app.jobs.jobs, "Worker did not complete")
+
+        with tempfile.TemporaryDirectory() as directory:
+            good = Path(directory) / "good.csv"
+            bad = Path(directory) / "unsafe.csv"
+            good.write_text("x,y\n1,2\n3,4\n5,6\n")
+            bad.write_text(f"id,y\n{2**64},1\n{2**64 + 1},2\n,3\n")
+
+            app.load_path(good)
+            drain()
+            original = app.app_state.dataset
+            app.apply_filters((FilterRule("x", lower=3),))
+            drain()
+            mask = app.app_state.mask
+            filters = app.app_state.filters
+            revision = app.app_state.revision
+
+            app.load_path(bad)
+            drain()
+
+            self.assertEqual(len(app.errors), 1)
+            self.assertRegex(str(app.errors[0]), "cannot be represented exactly|64-bit integer")
+            self.assertIs(app.app_state.dataset, original)
+            self.assertIs(app.app_state.mask, mask)
+            self.assertEqual(app.app_state.filters, filters)
+            self.assertEqual(app.app_state.revision, revision)
+
     def test_import_filter_failed_load_and_replacement_across_views(self):
         app = Coordinator()
         self.addCleanup(app.jobs.close)
