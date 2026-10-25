@@ -1,0 +1,141 @@
+{
+  "id": "SP-GUI-01-C0",
+  "baseline": {
+    "repository": "sebastian-norero-cardenas/varia-studio",
+    "commit": "68488e6c339b8cd60011d51380cb8250c488fb35",
+    "tree": "8a82aba20a72a912fda2c05a48582f6e24d3a95b"
+  },
+  "corpus": {
+    "F-500": {
+      "filename": "test_sample_500.csv",
+      "rows": 500,
+      "columns": 61,
+      "sha256": "947eb8dc651a83df4c1edabb7f1c6a21a01680939fd7135613dba264b35df1ed",
+      "purpose": "functional only",
+      "source": "provided project fixture; not a performance corpus"
+    },
+    "S-200K-mixed": {
+      "filename": "S-200K-mixed.csv",
+      "rows": 200000,
+      "columns": 61,
+      "seed": 20261025,
+      "sha256": "50d6cb79a7bfcc6085fc146ff51f167d981a6229e077b9f9173336a178b50ac4",
+      "generator": "spikes/sp_gui_01/common/corpus.py",
+      "schema_groups": {
+        "integer_nullable": 15,
+        "float": 20,
+        "text": 10,
+        "category": 5,
+        "boolean": 5,
+        "timestamp": 6
+      },
+      "note": "synthetic representative corpus; it is not the historical product dataset"
+    },
+    "invalid-B": {
+      "filename": "spikes/sp_gui_01/fixtures/invalid_width.csv",
+      "sha256": "b934f70d21fdcd017e6e859bb37d6789ed796cb1169c04e500f9ac0275258fc3"
+    }
+  },
+  "table": {
+    "default_scope": "Selected rows",
+    "alternate_scope": "All rows",
+    "visible_columns": [
+      "Source Row ID",
+      "int_exact",
+      "sort_key",
+      "int_nullable_00",
+      "float_00",
+      "float_01",
+      "text_00",
+      "category_00",
+      "bool_00",
+      "timestamp_00"
+    ],
+    "go_to_source_row_ids": [1, 100000, 200000],
+    "excluded_navigation_row_id": 100001
+  },
+  "filter": {
+    "column": "int_nullable_00",
+    "operator": ">=",
+    "value": 500000,
+    "expected_selected": 33039,
+    "expected_total": 200000
+  },
+  "sort": {
+    "column": "sort_key",
+    "nulls": "last",
+    "ties": "Source Row ID ascending",
+    "all_ascending_first10": [100,200,300,400,500,600,700,800,900,1000],
+    "all_ascending_last10": [199071,199172,199273,199374,199475,199576,199677,199778,199879,199980],
+    "all_descending_first10": [47,147,247,347,447,547,647,747,847,947],
+    "selected_ascending_first10": [166700,166800,166900,167000,167100,167200,167300,167400,167500,167600]
+  },
+  "search": [
+    {
+      "id": "contains-whole",
+      "query": "needle",
+      "scope": "Whole dataset",
+      "target": "text_00",
+      "mode": "Contains",
+      "expected_source_row_ids": [7,100000,199999]
+    },
+    {
+      "id": "contains-selected",
+      "query": "needle",
+      "scope": "Selected rows",
+      "target": "text_00",
+      "mode": "Contains",
+      "expected_source_row_ids": [199999]
+    },
+    {
+      "id": "exact-large-int",
+      "query": "9007199254740993",
+      "scope": "Whole dataset",
+      "target": "int_exact",
+      "mode": "Exact",
+      "expected_source_row_ids": [100001]
+    },
+    {
+      "id": "absent",
+      "query": "zz-no-such-value",
+      "scope": "Whole dataset",
+      "target": "All visible columns",
+      "mode": "Contains",
+      "expected_source_row_ids": []
+    }
+  ],
+  "copy": {
+    "source_row_ids": [100000,100001],
+    "columns": ["Source Row ID","int_exact"],
+    "expected_tsv": "100000\t9007199254740992\n100001\t9007199254740993"
+  },
+  "scatter": {
+    "x": "float_00",
+    "y": "float_01",
+    "sample_limit": 5000,
+    "sampling_seed_selected": 0,
+    "sampling_seed_excluded": 1,
+    "expected_selected_after_filter": 33039,
+    "expected_usable_after_filter": 32598,
+    "expected_usable_without_filter": 197333
+  },
+  "measurements": {
+    "series_samples": 10,
+    "report": ["n","median","p95","min","max"],
+    "events": [
+      "startup","load","first_paint","scroll","go_to_source_row","search","sort","filter",
+      "scatter_prepare","scatter_redraw","cancel_feedback","resize","area_switch"
+    ],
+    "memory": ["rss","peak_rss"],
+    "installation": ["dependency_inventory","installed_size"]
+  },
+  "visual_matrix": [
+    "1366x768@100%","1920x1080@100%","1366x768@125%","1366x768@150%",
+    "1920x1080@125%","1920x1080@150%"
+  ],
+  "scenarios": ["S01","S02","S03","S04","S05","S06","S07","S08","S09","S10","S11","S12","S13","S14","S15","S16"],
+  "hard_gates": ["AC-01","AC-02","AC-03","AC-04","AC-05","AC-06","AC-07","AC-08","AC-09","AC-10","AC-11","AC-12","AC-13","AC-14","AC-15","AC-16","AC-17","AC-18","AC-19"],
+  "candidate_order": ["CTk->Qt","Qt->CTk"],
+  "language": "English",
+  "statistics_area": "Not implemented in spike"
+}
