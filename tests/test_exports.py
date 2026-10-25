@@ -1,5 +1,4 @@
 import errno
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,33 +51,43 @@ class ExportTests(unittest.TestCase):
             self.assertEqual(list(Path(directory).iterdir()), [path])
 
     def test_figure_no_overwrite_race_preserves_other_writer(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "plot.png"
+        for suffix in ("png", "pdf", "svg"):
+            with self.subTest(suffix=suffix), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / f"plot.{suffix}"
 
-            class RacingFigure:
-                def savefig(self, temporary, **kwargs):
-                    Path(temporary).write_bytes(b"complete export")
-                    path.write_bytes(b"created by another writer")
+                class RacingFigure:
+                    def savefig(self, temporary, **kwargs):
+                        Path(temporary).write_bytes(b"complete export")
+                        path.write_bytes(b"created by another writer")
 
-            with self.assertRaisesRegex(DataError, "created while|already exists"):
-                export_figure(RacingFigure(), path)
-            self.assertEqual(path.read_bytes(), b"created by another writer")
-            self.assertEqual(list(Path(directory).iterdir()), [path])
+                with self.assertRaisesRegex(DataError, "created while|already exists"):
+                    export_figure(RacingFigure(), path)
+                self.assertEqual(path.read_bytes(), b"created by another writer")
+                self.assertEqual(list(Path(directory).iterdir()), [path])
 
-    def test_no_overwrite_rejects_dangling_symlink(self):
+    def test_no_overwrite_rejects_existing_and_dangling_symlinks(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            path = root / "summary.csv"
-            target = root / "missing.csv"
+            target = root / "target.csv"
+            existing = root / "existing.csv"
+            dangling = root / "dangling.csv"
+            target.write_text("original")
             try:
-                path.symlink_to(target.name)
+                existing.symlink_to(target.name)
+                dangling.symlink_to("missing.csv")
             except OSError as exc:
                 self.skipTest(f"Symlinks are unavailable: {exc}")
+
             with self.assertRaisesRegex(DataError, "already exists"):
-                export_statistics(pd.DataFrame({"x": [1]}), path)
-            self.assertTrue(path.is_symlink())
-            self.assertFalse(target.exists())
-            self.assertEqual(set(root.iterdir()), {path})
+                export_statistics(pd.DataFrame({"x": [1]}), existing)
+            with self.assertRaisesRegex(DataError, "already exists"):
+                export_statistics(pd.DataFrame({"x": [1]}), dangling)
+
+            self.assertEqual(target.read_text(), "original")
+            self.assertTrue(existing.is_symlink())
+            self.assertTrue(dangling.is_symlink())
+            self.assertFalse((root / "missing.csv").exists())
+            self.assertEqual(set(root.iterdir()), {target, existing, dangling})
 
     def test_no_overwrite_unsupported_publication_is_safe_and_clean(self):
         with tempfile.TemporaryDirectory() as directory:
