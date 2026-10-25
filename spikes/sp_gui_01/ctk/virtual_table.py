@@ -55,6 +55,13 @@ class VirtualTreeTable(ctk.CTkFrame):
         self.tree.bind("<Button-5>", lambda event: self._scroll_units(3))
         self.tree.bind("<Prior>", lambda event: self._page(-1))
         self.tree.bind("<Next>", lambda event: self._page(1))
+        self.tree.bind("<Up>", lambda event: self._move_focus(-1))
+        self.tree.bind("<Down>", lambda event: self._move_focus(1))
+        self.tree.bind("<Home>", lambda event: self._move_to_logical(0))
+        self.tree.bind(
+            "<End>",
+            lambda event: self._move_to_logical(max(0, len(self.ordered_ids) - 1)),
+        )
 
         for index in range(window_rows):
             self.tree.insert("", "end", iid=f"slot-{index}", values=())
@@ -233,6 +240,42 @@ class VirtualTreeTable(ctk.CTkFrame):
 
     def _page(self, direction: int):
         self._scroll_units(direction * max(1, self.window_rows - 3))
+        return "break"
+
+    def _move_focus(self, delta: int):
+        if not len(self.ordered_ids):
+            return "break"
+        iid = self.tree.focus()
+        if iid in self._slot_ids:
+            slot = int(iid.split("-")[-1])
+            logical = self.offset + slot
+        else:
+            logical = self.offset
+        return self._move_to_logical(
+            min(max(0, logical + delta), len(self.ordered_ids) - 1)
+        )
+
+    def _move_to_logical(self, logical: int):
+        if not len(self.ordered_ids):
+            return "break"
+        logical = min(max(0, int(logical)), len(self.ordered_ids) - 1)
+        if logical < self.offset:
+            self.offset = logical
+        elif logical >= self.offset + self.window_rows:
+            self.offset = min(
+                logical - self.window_rows + 1,
+                self._max_offset(),
+            )
+        source_id = int(self.ordered_ids[logical])
+        self._selected_ids = {source_id}
+        self.refresh()
+        slot = logical - self.offset
+        iid = f"slot-{slot}"
+        if iid in self._slot_ids:
+            self.tree.selection_set(iid)
+            self.tree.focus(iid)
+            self.tree.see(iid)
+            self.on_selection((source_id,))
         return "break"
 
     def _max_offset(self) -> int:
