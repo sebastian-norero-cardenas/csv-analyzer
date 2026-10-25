@@ -1,7 +1,7 @@
 import tempfile
-from decimal import Decimal
 import unittest
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 
 import numpy as np
