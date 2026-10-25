@@ -43,6 +43,106 @@ class ViewState:
     dirty_plot: bool = False
 
 
+def sort_source_ids(
+    frame: pd.DataFrame,
+    source_ids: np.ndarray,
+    column: str | None,
+    descending: bool = False,
+) -> np.ndarray:
+    """Return global order for one scope with nulls last and stable Source Row ties."""
+    ids = np.asarray(source_ids, dtype=np.int64)
+    if column is None:
+        return np.sort(ids)
+    if column == SOURCE_ROW:
+        ordered = np.sort(ids)
+        return ordered[::-1] if descending else ordered
+    values = frame.iloc[ids - 1][column].array
+    work = pd.DataFrame({"value": values, "source": ids})
+    ordered = work.sort_values(
+        ["value", "source"],
+        ascending=[not descending, True],
+        na_position="last",
+        kind="mergesort",
+    )
+    return ordered["source"].to_numpy(dtype=np.int64)
+
+
+def _typed_match(series: pd.Series, query: str, mode: str) -> np.ndarray:
+    if mode == CONTAINS:
+        return (
+            series.astype("string")
+            .str.contains(query, case=False, regex=False, na=False)
+            .to_numpy(dtype=bool)
+        )
+    if mode != EXACT:
+        raise ValueError(mode)
+    if pd.api.types.is_bool_dtype(series.dtype):
+        normalized = query.strip().casefold()
+        if normalized not in ("true", "false"):
+            return np.zeros(len(series), dtype=bool)
+        return series.eq(normalized == "true").fillna(False).to_numpy(dtype=bool)
+    if pd.api.types.is_integer_dtype(series.dtype):
+        try:
+            parsed = int(query.strip())
+        except ValueError:
+            return np.zeros(len(series), dtype=bool)
+        return series.eq(parsed).fillna(False).to_numpy(dtype=bool)
+    if pd.api.types.is_float_dtype(series.dtype):
+        try:
+            parsed = float(query.strip())
+        except ValueError:
+            return np.zeros(len(series), dtype=bool)
+        return series.eq(parsed).fillna(False).to_numpy(dtype=bool)
+    if pd.api.types.is_datetime64_any_dtype(series.dtype):
+        try:
+            parsed = pd.Timestamp(query)
+        except (TypeError, ValueError):
+            return np.zeros(len(series), dtype=bool)
+        return series.eq(parsed).fillna(False).to_numpy(dtype=bool)
+    return series.astype("string").eq(query).fillna(False).to_numpy(dtype=bool)
+
+
+def search_source_ids(
+    frame: pd.DataFrame,
+    source_ids: np.ndarray,
+    request: SearchRequest,
+    visible_columns: Iterable[str],
+) -> tuple[int, ...]:
+    """Global typed search over the declared scope; membership is independent of sort."""
+    ids = np.asarray(source_ids, dtype=np.int64)
+    targets = (
+        tuple(visible_columns)
+        if request.target == "All visible columns"
+        else (request.target,)
+    )
+    matched = np.zeros(len(ids), dtype=bool)
+    subset = frame.iloc[ids - 1]
+    for target in targets:
+        if target == SOURCE_ROW:
+            if request.mode == CONTAINS:
+                target_mask = np.fromiter(
+                    (
+                        request.query.casefold() in str(int(item)).casefold()
+                        for item in ids
+                    ),
+                    dtype=bool,
+                    count=len(ids),
+                )
+            else:
+                try:
+                    parsed = int(request.query.strip())
+                except ValueError:
+                    target_mask = np.zeros(len(ids), dtype=bool)
+                else:
+                    target_mask = ids == parsed
+        else:
+            target_mask = _typed_match(subset[target], request.query, request.mode)
+        matched |= target_mask
+        if matched.all():
+            break
+    return tuple(int(item) for item in ids[matched])
+
+
 class SpikeModel:
     """Common semantic oracle/adaptor used by both GUI spikes."""
 
@@ -122,21 +222,12 @@ class SpikeModel:
         raise ValueError(scope)
 
     def ordered_source_ids(self, scope: str | None = None) -> np.ndarray:
-        ids = self.scope_source_ids(scope)
-        if self.view.sort_column is None:
-            return np.sort(ids)
-        frame = self.dataset.frame.iloc[ids - 1]
-        column = self.view.sort_column
-        if column == SOURCE_ROW:
-            return np.sort(ids)[::-1] if self.view.descending else np.sort(ids)
-        work = pd.DataFrame({"value": frame[column].array, "source": ids})
-        ordered = work.sort_values(
-            ["value", "source"],
-            ascending=[not self.view.descending, True],
-            na_position="last",
-            kind="mergesort",
+        return sort_source_ids(
+            self.dataset.frame,
+            self.scope_source_ids(scope),
+            self.view.sort_column,
+            self.view.descending,
         )
-        return ordered["source"].to_numpy(dtype=np.int64)
 
     def sort(self, column: str, descending: bool = False) -> None:
         self._require_column(column)
@@ -228,12 +319,9 @@ class SpikeModel:
             if request.scope == SEARCH_SELECTED
             else self.source_ids
         )
-        matches = [
-            source_id
-            for source_id in scope_ids
-            if self._row_matches(int(source_id), request)
-        ]
-        self.view.match_ids = tuple(int(item) for item in matches)
+        self.view.match_ids = search_source_ids(
+            self.dataset.frame, scope_ids, request, self.view.visible_columns
+        )
         self.view.match_cursor = -1
 
     def _ordered_match_ids(self) -> list[int]:
