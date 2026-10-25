@@ -463,12 +463,17 @@ def load_dataset(
 
             integer_candidates = _nullable_integer_candidates(frame)
             if integer_candidates:
+                check_cancelled(cancel)
                 raw_integer_columns = pd.read_csv(
                     path,
                     **read_options,
                     usecols=integer_candidates,
                     dtype={name: "string" for name in integer_candidates},
                 )
+                if len(raw_integer_columns) != len(frame):
+                    raise DataError(
+                        "The exact integer validation pass disagrees with the parsed row count."
+                    )
                 _restore_nullable_integer_columns(frame, raw_integer_columns, notices)
         if len(frame) != rows:
             raise DataError(
