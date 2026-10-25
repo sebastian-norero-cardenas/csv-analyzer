@@ -6,6 +6,7 @@ import tkinter as tk
 from dataclasses import asdict
 
 import customtkinter as ctk
+from pandas.api.types import is_integer_dtype
 
 from .. import config as C
 from ..data import DataError, ImportOptions
@@ -191,13 +192,16 @@ class FilterDialog(Modal):
 
     def add(self):
         try:
-            rule = FilterRule(
-                self.column.get(),
-                entry_value(self.lower, "Minimum", optional=True),
-                entry_value(self.upper, "Maximum", optional=True),
-            )
-            if rule.column not in self.app.app_state.dataset.numeric_columns:
+            column = self.column.get()
+            dataset = self.app.app_state.dataset
+            if column not in dataset.numeric_columns:
                 raise DataError("Choose a numeric column from the list.")
+            exact = is_integer_dtype(dataset.frame[column].dtype)
+            rule = FilterRule(
+                column,
+                entry_value(self.lower, "Minimum", optional=True, exact=exact),
+                entry_value(self.upper, "Maximum", optional=True, exact=exact),
+            )
             if rule.lower is None and rule.upper is None:
                 raise DataError("Enter at least one bound.")
             if rule.lower is not None and rule.upper is not None and rule.lower > rule.upper:
