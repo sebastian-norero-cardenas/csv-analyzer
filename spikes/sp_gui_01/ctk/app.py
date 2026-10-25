@@ -69,6 +69,7 @@ class CtkSpikeApp(ctk.CTk):
         self.samples: list[Sample] = []
         self.model = SpikeModel(DEFAULT_VISIBLE)
         self._closed = False
+        self._busy = False
         self.jobs = TaskRunner(self, self._activity_changed)
         self._active_path: Path | None = None
         self._ordered_ids = np.array([], dtype=np.int64)
@@ -807,6 +808,9 @@ class CtkSpikeApp(ctk.CTk):
     def _activity_changed(self, busy: bool) -> None:
         if self._closed:
             return
+        if busy == self._busy:
+            return
+        self._busy = busy
         self.cancel_button.configure(
             state="normal" if busy else "disabled"
         )
