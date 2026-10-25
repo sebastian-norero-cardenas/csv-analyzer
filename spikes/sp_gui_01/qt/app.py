@@ -4,6 +4,11 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - Linux is the primary spike target
+    resource = None
 from pathlib import Path
 
 import numpy as np
@@ -978,6 +983,10 @@ class QtSpikeWindow(QMainWindow):
 
     def _activity_changed(self, busy: bool) -> None:
         self.cancel_button.setEnabled(busy)
+        if not busy:
+            self.samples.append(
+                Sample("settled", 0.0, current_rss_kib(), {})
+            )
 
     def cancel_job(self, key: str) -> None:
         started = time.perf_counter()
@@ -1053,6 +1062,11 @@ class QtSpikeWindow(QMainWindow):
                     "toolkit": "PySide6/Qt Widgets",
                     "dataset": str(self._active_path or ""),
                     "candidate": "SP-GUI-01",
+                    "peak_rss_kib": (
+                        int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+                        if resource is not None
+                        else None
+                    ),
                 },
             )
         self.runner.close()
