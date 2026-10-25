@@ -84,6 +84,8 @@ class QtSpikeWindow(QMainWindow):
         self.model = SpikeModel(DEFAULT_VISIBLE)
         self.runner = QtTaskRunner(self)
         self.runner.activity_changed.connect(self._activity_changed)
+        self._busy = False
+        self._closing = False
         self._active_path: Path | None = None
         self._ordered_ids = np.array([], dtype=np.int64)
         self._sort_column: str | None = None
@@ -982,6 +984,9 @@ class QtSpikeWindow(QMainWindow):
             )
 
     def _activity_changed(self, busy: bool) -> None:
+        if self._closing or busy == self._busy:
+            return
+        self._busy = busy
         self.cancel_button.setEnabled(busy)
         if not busy:
             self.samples.append(
@@ -1054,6 +1059,7 @@ class QtSpikeWindow(QMainWindow):
         )
 
     def closeEvent(self, event) -> None:
+        self._closing = True
         if self.metrics_path:
             write_json(
                 self.metrics_path,
