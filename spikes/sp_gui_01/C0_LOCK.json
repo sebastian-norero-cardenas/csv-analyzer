@@ -1,0 +1,10 @@
+{
+  "id": "SP-GUI-01-C0",
+  "status": "FROZEN",
+  "rule": "CTk and Qt candidates must branch directly from this commit.",
+  "mutable_after_freeze": false,
+  "notes": [
+    "manifest.json, corpus recipe, common semantic model and measurement primitives are common authority",
+    "candidate branches may add toolkit adapters/tests but must not alter C0 inputs"
+  ]
+}
