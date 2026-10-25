@@ -56,6 +56,41 @@ class Coordinator:
 
 
 class CoordinatorTests(unittest.TestCase):
+    def test_nul_import_failure_preserves_active_dataset_and_selection(self):
+        app = Coordinator()
+        self.addCleanup(app.jobs.close)
+
+        def drain():
+            deadline = time.monotonic() + 5
+            while app.jobs.jobs and time.monotonic() < deadline:
+                app.jobs.poll()
+                time.sleep(0.005)
+            self.assertFalse(app.jobs.jobs, "Worker did not complete")
+
+        with tempfile.TemporaryDirectory() as directory:
+            good = Path(directory) / "good.csv"
+            bad = Path(directory) / "nul.csv"
+            good.write_text("x,y\n1,2\n3,4\n5,6\n")
+            bad.write_bytes(b"name,value\nabc\x00def,1\n")
+
+            app.load_path(good)
+            drain()
+            original = app.app_state.dataset
+            app.apply_filters((FilterRule("x", lower=3),))
+            drain()
+            mask = app.app_state.mask
+            filters = app.app_state.filters
+            revision = app.app_state.revision
+
+            app.load_path(bad)
+            drain()
+
+            self.assertEqual(len(app.errors), 1)
+            self.assertIs(app.app_state.dataset, original)
+            self.assertIs(app.app_state.mask, mask)
+            self.assertEqual(app.app_state.filters, filters)
+            self.assertEqual(app.app_state.revision, revision)
+
     def test_import_filter_failed_load_and_replacement_across_views(self):
         app = Coordinator()
         self.addCleanup(app.jobs.close)
