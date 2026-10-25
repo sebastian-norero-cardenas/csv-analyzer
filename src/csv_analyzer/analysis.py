@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import threading
+from decimal import Decimal
 
 import numpy as np
 import pandas as pd
@@ -16,6 +17,25 @@ from pandas.api.types import (
 
 from .data import DataError, check_cancelled
 from .state import FilterRule
+
+
+def _finite_filter_bound(bound) -> bool:
+    if isinstance(bound, Decimal):
+        return bound.is_finite()
+    if isinstance(bound, (bool, np.bool_)):
+        return False
+    if isinstance(bound, (int, np.integer)):
+        return True
+    if isinstance(bound, (float, np.floating)):
+        return math.isfinite(float(bound))
+    return False
+
+
+def _float_filter_bound(bound) -> float:
+    try:
+        return float(bound)
+    except OverflowError:
+        return math.inf if bound > 0 else -math.inf
 
 
 def numeric_array(frame: pd.DataFrame, column: str) -> np.ndarray:
@@ -51,13 +71,10 @@ def build_filter_mask(
             raise DataError(f"Column {rule.column!r} is not numeric. Choose a numeric column.")
         if rule.lower is None and rule.upper is None:
             raise DataError("A filter needs at least one bound.")
-        try:
-            finite_bounds = all(
-                bound is None or math.isfinite(bound) for bound in (rule.lower, rule.upper)
-            )
-        except (TypeError, ValueError):
-            finite_bounds = False
-        if not finite_bounds:
+        if not all(
+            bound is None or _finite_filter_bound(bound)
+            for bound in (rule.lower, rule.upper)
+        ):
             raise DataError("Filter bounds must be finite numbers.")
         try:
             reversed_bounds = (
@@ -84,9 +101,9 @@ def build_filter_mask(
         values = numeric_array(frame, rule.column)
         mask &= np.isfinite(values)
         if rule.lower is not None:
-            mask &= values >= float(rule.lower)
+            mask &= values >= _float_filter_bound(rule.lower)
         if rule.upper is not None:
-            mask &= values <= float(rule.upper)
+            mask &= values <= _float_filter_bound(rule.upper)
     return mask
 
 
