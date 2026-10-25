@@ -203,7 +203,9 @@ class Application(MainWindow):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(\n        description=f"{C.APP_TITLE}: explore CSV and scientific DAT datasets."\n    )
+    parser = argparse.ArgumentParser(
+        description=f"{C.APP_TITLE}: explore CSV and scientific DAT datasets."
+    )
     parser.add_argument("file", nargs="?", type=Path, help="Dataset to open at startup")
     parser.add_argument("--debug", action="store_true", help="Log diagnostic details to stderr")
     args = parser.parse_args(argv)
