@@ -8,10 +8,9 @@ import numpy as np
 import pandas as pd
 
 try:
-    from PySide6.QtCore import QCoreApplication, Qt
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
 except ImportError:
-    QCoreApplication = None
     Qt = None
     QApplication = None
 
@@ -23,10 +22,6 @@ if QApplication is not None:
 
 @unittest.skipUnless(QApplication is not None, "PySide6 is not installed")
 class FrameTableModelTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.app = QCoreApplication.instance() or QCoreApplication([])
-
     def test_model_exposes_200k_rows_without_row_widgets_or_materialized_cells(self):
         frame = pd.DataFrame(
             {
@@ -71,6 +66,10 @@ class FrameTableModelTests(unittest.TestCase):
     "Qt GUI environment required",
 )
 class QtShellTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
     def test_shell_has_same_three_areas_and_statistics_placeholder(self):
         from spikes.sp_gui_01.qt.app import QtSpikeWindow
 
