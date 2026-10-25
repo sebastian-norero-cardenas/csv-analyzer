@@ -9,6 +9,7 @@ from .. import config as C
 from ..analysis import categorical_summary, correlation_summary, numeric_summary
 from ..exports import export_statistics
 from .dialogs import ColumnsDialog
+from .exporting import export_with_confirmation
 from .widgets import DataTable, button, label
 
 
@@ -169,7 +170,16 @@ class StatisticsTab(ctk.CTkFrame):
         if not path:
             return
         try:
-            export_statistics(self.result, path, overwrite=True)
-            self.app.set_status(f"Statistics exported to {path}")
+            published = export_with_confirmation(
+                self,
+                path,
+                lambda overwrite: export_statistics(
+                    self.result,
+                    path,
+                    overwrite=overwrite,
+                ),
+            )
+            if published is not None:
+                self.app.set_status(f"Statistics exported to {published}")
         except Exception as exc:
             self.app.show_error(exc)
