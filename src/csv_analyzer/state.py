@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Callable
 
 import numpy as np
@@ -16,8 +17,8 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class FilterRule:
     column: str
-    lower: float | None = None
-    upper: float | None = None
+    lower: int | float | Decimal | None = None
+    upper: int | float | Decimal | None = None
 
 
 class AppState:

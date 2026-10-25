@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 
 import numpy as np
@@ -71,6 +72,105 @@ class AnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(result.loc["x", "Mean"], 2.5)
         self.assertEqual(result.loc["y", "Valid"], 2)
 
+    def test_integer_filters_preserve_precision_beyond_float64(self):
+        base = 2**53
+        frame = pd.DataFrame({"id": np.array([base, base + 1, base + 2], dtype=np.int64)})
+        cases = (
+            (FilterRule("id", upper=float(base)), [True, False, False]),
+            (FilterRule("id", lower=base + 1), [False, True, True]),
+            (FilterRule("id", lower=base + 1, upper=base + 1), [False, True, False]),
+            (
+                FilterRule(
+                    "id",
+                    lower=Decimal("9007199254740992.5"),
+                    upper=Decimal("9007199254740993"),
+                ),
+                [False, True, False],
+            ),
+        )
+        for rule, expected in cases:
+            with self.subTest(rule=rule):
+                self.assertEqual(build_filter_mask(frame, (rule,)).tolist(), expected)
+
+    def test_uint64_filters_preserve_precision(self):
+        base = 2**63
+        frame = pd.DataFrame(
+            {"id": np.array([base, base + 1, np.iinfo(np.uint64).max], dtype=np.uint64)}
+        )
+        self.assertEqual(
+            build_filter_mask(frame, (FilterRule("id", upper=float(base)),)).tolist(),
+            [True, False, False],
+        )
+        self.assertEqual(
+            build_filter_mask(
+                frame, (FilterRule("id", lower=base + 1, upper=base + 1),)
+            ).tolist(),
+            [False, True, False],
+        )
+
+    def test_nullable_integer_filters_treat_missing_as_nonmatching(self):
+        signed_base = 2**53
+        unsigned_base = 2**63
+        frame = pd.DataFrame(
+            {
+                "signed": pd.Series([signed_base, pd.NA, signed_base + 1], dtype="Int64"),
+                "unsigned": pd.Series(
+                    [unsigned_base, pd.NA, unsigned_base + 1], dtype="UInt64"
+                ),
+            }
+        )
+        self.assertEqual(
+            build_filter_mask(
+                frame, (FilterRule("signed", upper=float(signed_base)),)
+            ).tolist(),
+            [True, False, False],
+        )
+        self.assertEqual(
+            build_filter_mask(
+                frame, (FilterRule("unsigned", upper=float(unsigned_base)),)
+            ).tolist(),
+            [True, False, False],
+        )
+
+    def test_extreme_finite_filter_bounds_are_type_aware(self):
+        huge = 10**400
+        decimal_huge = Decimal("1e400")
+        signed = pd.DataFrame({"id": np.array([-2, 0, 2], dtype=np.int64)})
+        unsigned = pd.DataFrame({"id": np.array([0, 2], dtype=np.uint64)})
+
+        for bound in (huge, decimal_huge):
+            with self.subTest(bound=bound, side="upper"):
+                self.assertEqual(
+                    build_filter_mask(signed, (FilterRule("id", upper=bound),)).tolist(),
+                    [True, True, True],
+                )
+            with self.subTest(bound=bound, side="lower"):
+                self.assertEqual(
+                    build_filter_mask(signed, (FilterRule("id", lower=bound),)).tolist(),
+                    [False, False, False],
+                )
+
+        for bound in (-huge, Decimal("-1e400")):
+            with self.subTest(bound=bound, side="lower"):
+                self.assertEqual(
+                    build_filter_mask(signed, (FilterRule("id", lower=bound),)).tolist(),
+                    [True, True, True],
+                )
+            with self.subTest(bound=bound, side="upper"):
+                self.assertEqual(
+                    build_filter_mask(signed, (FilterRule("id", upper=bound),)).tolist(),
+                    [False, False, False],
+                )
+
+        self.assertEqual(
+            build_filter_mask(unsigned, (FilterRule("id", lower=-huge),)).tolist(),
+            [True, True],
+        )
+        self.assertEqual(
+            build_filter_mask(unsigned, (FilterRule("id", upper=huge),)).tolist(),
+            [True, True],
+        )
+
     def test_bad_filters(self):
         for rule in (
             FilterRule("group", 1),
@@ -78,6 +178,9 @@ class AnalysisTests(unittest.TestCase):
             FilterRule("x"),
             FilterRule("x", 4, 2),
             FilterRule("x", np.nan),
+            FilterRule("x", Decimal("NaN")),
+            FilterRule("x", Decimal("Infinity")),
+            FilterRule("x", "3"),
         ):
             with self.subTest(rule=rule), self.assertRaises(DataError):
                 build_filter_mask(self.frame, (rule,))

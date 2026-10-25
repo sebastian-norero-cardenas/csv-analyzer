@@ -2,14 +2,40 @@
 
 from __future__ import annotations
 
+import math
 import threading
+from decimal import Decimal
 
 import numpy as np
 import pandas as pd
-from pandas.api.types import is_bool_dtype, is_datetime64_any_dtype, is_numeric_dtype
+from pandas.api.types import (
+    is_bool_dtype,
+    is_datetime64_any_dtype,
+    is_integer_dtype,
+    is_numeric_dtype,
+)
 
 from .data import DataError, check_cancelled
 from .state import FilterRule
+
+
+def _finite_filter_bound(bound) -> bool:
+    if isinstance(bound, Decimal):
+        return bound.is_finite()
+    if isinstance(bound, (bool, np.bool_)):
+        return False
+    if isinstance(bound, (int, np.integer)):
+        return True
+    if isinstance(bound, (float, np.floating)):
+        return math.isfinite(float(bound))
+    return False
+
+
+def _float_filter_bound(bound) -> float:
+    try:
+        return float(bound)
+    except OverflowError:
+        return math.inf if bound > 0 else -math.inf
 
 
 def numeric_array(frame: pd.DataFrame, column: str) -> np.ndarray:
@@ -38,19 +64,46 @@ def build_filter_mask(
     mask = np.ones(len(frame), dtype=bool)
     for rule in rules:
         check_cancelled(cancel)
-        values = numeric_array(frame, rule.column)
+        if rule.column not in frame:
+            raise DataError(f"Column {rule.column!r} is not in the current dataset.")
+        series = frame[rule.column]
+        if not is_numeric_dtype(series.dtype) or is_bool_dtype(series.dtype):
+            raise DataError(f"Column {rule.column!r} is not numeric. Choose a numeric column.")
         if rule.lower is None and rule.upper is None:
             raise DataError("A filter needs at least one bound.")
-        for bound in (rule.lower, rule.upper):
-            if bound is not None and not np.isfinite(bound):
-                raise DataError("Filter bounds must be finite numbers.")
-        if rule.lower is not None and rule.upper is not None and rule.lower > rule.upper:
+        if not all(
+            bound is None or _finite_filter_bound(bound)
+            for bound in (rule.lower, rule.upper)
+        ):
+            raise DataError("Filter bounds must be finite numbers.")
+        try:
+            reversed_bounds = (
+                rule.lower is not None
+                and rule.upper is not None
+                and rule.lower > rule.upper
+            )
+        except (TypeError, ValueError):
+            raise DataError("Filter bounds must be finite numbers.") from None
+        if reversed_bounds:
             raise DataError("The lower filter bound must not exceed the upper bound.")
+
+        if is_integer_dtype(series.dtype):
+            rule_mask = series.notna().to_numpy(dtype=bool)
+            if rule.lower is not None:
+                lower = math.ceil(rule.lower)
+                rule_mask &= series.ge(lower).fillna(False).to_numpy(dtype=bool)
+            if rule.upper is not None:
+                upper = math.floor(rule.upper)
+                rule_mask &= series.le(upper).fillna(False).to_numpy(dtype=bool)
+            mask &= rule_mask
+            continue
+
+        values = numeric_array(frame, rule.column)
         mask &= np.isfinite(values)
         if rule.lower is not None:
-            mask &= values >= rule.lower
+            mask &= values >= _float_filter_bound(rule.lower)
         if rule.upper is not None:
-            mask &= values <= rule.upper
+            mask &= values <= _float_filter_bound(rule.upper)
     return mask
 
 
