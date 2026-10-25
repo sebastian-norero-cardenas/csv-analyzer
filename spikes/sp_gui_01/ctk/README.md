@@ -8,6 +8,27 @@ python -m spikes.sp_gui_01.ctk.app /tmp/SP-GUI-01/S-200K-mixed.csv \
   --metrics /tmp/SP-GUI-01/ctk-metrics.json
 ```
 
+## Verification commands
+
+```bash
+# Functional-only supplied fixture
+python -m spikes.sp_gui_01.ctk.app /path/to/test_sample_500.csv
+
+# Frozen hard gates; reuse the generated corpus rather than regenerating it
+SP_GUI_01_S200K=/tmp/SP-GUI-01/S-200K-mixed.csv \
+  python -m unittest spikes.sp_gui_01.ctk.test_hard_gates -v
+
+# Real-display adapter checks
+python -m unittest spikes.sp_gui_01.ctk.test_ctk -v
+
+# Dependency/version/installed-size inventory
+python -m spikes.sp_gui_01.ctk.environment
+```
+
+The hard-gate file is byte-identical to the Qt candidate. GUI scenarios S01–S16,
+keyboard/focus and the DPI matrix still require a real display; a skipped display
+test is not a PASS.
+
 ## Table strategy
 
 The candidate uses one `ttk.Treeview` with a fixed window of 120 reusable items.
