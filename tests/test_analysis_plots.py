@@ -71,6 +71,58 @@ class AnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(result.loc["x", "Mean"], 2.5)
         self.assertEqual(result.loc["y", "Valid"], 2)
 
+    def test_integer_filters_preserve_precision_beyond_float64(self):
+        base = 2**53
+        frame = pd.DataFrame({"id": np.array([base, base + 1, base + 2], dtype=np.int64)})
+        cases = (
+            (FilterRule("id", upper=float(base)), [True, False, False]),
+            (FilterRule("id", lower=base + 1), [False, True, True]),
+            (FilterRule("id", lower=base + 1, upper=base + 1), [False, True, False]),
+        )
+        for rule, expected in cases:
+            with self.subTest(rule=rule):
+                self.assertEqual(build_filter_mask(frame, (rule,)).tolist(), expected)
+
+    def test_uint64_filters_preserve_precision(self):
+        base = 2**63
+        frame = pd.DataFrame(
+            {"id": np.array([base, base + 1, np.iinfo(np.uint64).max], dtype=np.uint64)}
+        )
+        self.assertEqual(
+            build_filter_mask(frame, (FilterRule("id", upper=float(base)),)).tolist(),
+            [True, False, False],
+        )
+        self.assertEqual(
+            build_filter_mask(
+                frame, (FilterRule("id", lower=base + 1, upper=base + 1),)
+            ).tolist(),
+            [False, True, False],
+        )
+
+    def test_nullable_integer_filters_treat_missing_as_nonmatching(self):
+        signed_base = 2**53
+        unsigned_base = 2**63
+        frame = pd.DataFrame(
+            {
+                "signed": pd.Series([signed_base, pd.NA, signed_base + 1], dtype="Int64"),
+                "unsigned": pd.Series(
+                    [unsigned_base, pd.NA, unsigned_base + 1], dtype="UInt64"
+                ),
+            }
+        )
+        self.assertEqual(
+            build_filter_mask(
+                frame, (FilterRule("signed", upper=float(signed_base)),)
+            ).tolist(),
+            [True, False, False],
+        )
+        self.assertEqual(
+            build_filter_mask(
+                frame, (FilterRule("unsigned", upper=float(unsigned_base)),)
+            ).tolist(),
+            [True, False, False],
+        )
+
     def test_bad_filters(self):
         for rule in (
             FilterRule("group", 1),
