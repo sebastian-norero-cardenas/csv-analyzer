@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
-from decimal import Decimal, InvalidOperation
 import tkinter as tk
+from decimal import Decimal, InvalidOperation
 from tkinter import ttk
 
 import customtkinter as ctk
