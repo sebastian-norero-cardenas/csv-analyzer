@@ -209,21 +209,25 @@ class QtSpikeWindow(QMainWindow):
         clear_search = QPushButton("Clear search")
         clear_search.clicked.connect(self.clear_search)
         row2.addWidget(clear_search)
-        row2.addSpacing(8)
-        row2.addWidget(QLabel("Filter >="))
+        layout.addLayout(row2)
+
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("Filter >="))
         self.filter_column = QComboBox()
-        row2.addWidget(self.filter_column)
+        self.filter_column.setMinimumWidth(150)
+        filter_row.addWidget(self.filter_column)
         self.filter_value = QLineEdit()
         self.filter_value.setPlaceholderText("value")
-        self.filter_value.setMaximumWidth(90)
-        row2.addWidget(self.filter_value)
+        self.filter_value.setMaximumWidth(100)
+        filter_row.addWidget(self.filter_value)
         apply_filter = QPushButton("Apply")
         apply_filter.clicked.connect(self.apply_filter)
-        row2.addWidget(apply_filter)
+        filter_row.addWidget(apply_filter)
         clear_filter = QPushButton("Clear")
         clear_filter.clicked.connect(self.clear_filter)
-        row2.addWidget(clear_filter)
-        layout.addLayout(row2)
+        filter_row.addWidget(clear_filter)
+        filter_row.addStretch(1)
+        layout.addLayout(filter_row)
 
         self.table_model = FrameTableModel(self)
         self.table = MeasuredTableView()
@@ -468,6 +472,7 @@ class QtSpikeWindow(QMainWindow):
 
         def success(result):
             ordered, nav = result
+            selected_ids = self.model.view.visual_selection
             self._record(event, started, rows=len(ids))
             self._ordered_ids = ordered
             self._search_ordered_matches = nav
@@ -475,6 +480,7 @@ class QtSpikeWindow(QMainWindow):
                 frame, self.model.view.visible_columns, ordered
             )
             self.table_model.set_sort_indicator(column, descending)
+            self._restore_visual_selection(selected_ids)
             self._update_counts()
             if focus_id is not None:
                 self._focus_source_id(focus_id)
@@ -561,6 +567,27 @@ class QtSpikeWindow(QMainWindow):
         )
         self.table.setCurrentIndex(index)
         return True
+
+    def _restore_visual_selection(self, source_ids) -> None:
+        selection = self.table.selectionModel()
+        selection.clearSelection()
+        flags = (
+            QItemSelectionModel.SelectionFlag.Select
+            | QItemSelectionModel.SelectionFlag.Rows
+        )
+        for source_id in source_ids:
+            row = self.table_model.row_for_source_id(int(source_id))
+            if row is not None:
+                selection.select(self.table_model.index(row, 0), flags)
+        rows = sorted(
+            {
+                index.row()
+                for index in selection.selectedIndexes()
+            }
+        )
+        self.model.view.visual_selection = tuple(
+            self.table_model.source_id_at(row) for row in rows
+        )
 
     def run_search(self) -> None:
         if self.model.dataset is None:
