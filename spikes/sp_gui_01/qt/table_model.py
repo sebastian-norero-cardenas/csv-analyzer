@@ -17,6 +17,7 @@ class FrameTableModel(QAbstractTableModel):
         super().__init__(parent)
         self.frame: pd.DataFrame | None = None
         self.columns: tuple[str, ...] = ()
+        self._column_positions: dict[str, int] = {}
         self.ordered_ids = np.array([], dtype=np.int64)
         self.sort_column: str | None = None
         self.sort_descending = False
@@ -36,7 +37,7 @@ class FrameTableModel(QAbstractTableModel):
         column = self.columns[index.column()]
         if column == SOURCE_ROW:
             return str(source_id)
-        value = self.frame.iloc[source_id - 1][column]
+        value = self.frame.iat[source_id - 1, self._column_positions[column]]
         if role == Qt.ItemDataRole.ToolTipRole:
             return self._canonical(value)
         return self._display(value)
@@ -60,7 +61,12 @@ class FrameTableModel(QAbstractTableModel):
         self.beginResetModel()
         self.frame = frame
         self.columns = tuple(columns)
-        self.ordered_ids = np.asarray(tuple(ordered_ids), dtype=np.int64)
+        self._column_positions = (
+            {name: int(frame.columns.get_loc(name)) for name in self.columns if name != SOURCE_ROW}
+            if frame is not None
+            else {}
+        )
+        self.ordered_ids = np.asarray(ordered_ids, dtype=np.int64)
         self.endResetModel()
 
     def set_sort_indicator(self, column: str | None, descending: bool = False) -> None:
