@@ -200,12 +200,19 @@ class _RecordLines:
     def __init__(self, stream):
         self.stream = stream
         self.has_content = False
+        self.line_num = 0
 
     def __iter__(self):
         return self
 
     def __next__(self):
         line = next(self.stream)
+        self.line_num += 1
+        if "\x00" in line:
+            raise DataError(
+                f"Line {self.line_num} contains Unicode NUL (U+0000). "
+                "Repair or remove the NUL character before importing."
+            )
         self.has_content |= bool(line.strip())
         return line
 
