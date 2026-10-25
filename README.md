@@ -1,6 +1,6 @@
-# CSV Analyzer
+# Varia Studio
 
-A desktop workspace for inspecting CSV/DAT datasets, exploring relationships and
+Varia Studio is a desktop workspace for inspecting CSV/DAT datasets, exploring relationships and
 distributions, and computing descriptive statistics. Python, CustomTkinter,
 pandas, NumPy, and Matplotlib; no web service or account required.
 
@@ -21,16 +21,20 @@ From this project directory:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
-csv-analyzer
+varia-studio
 ```
 
 On Windows, use `py -m venv .venv` and `.venv\Scripts\activate` instead.
-`python -m csv_analyzer` is an equivalent entry point. A file may be opened at
-startup:
+The historical `csv-analyzer` command remains available as a legacy compatibility
+alias. The technical module entry point `python -m csv_analyzer` also remains
+supported. A file may be opened at startup:
 
 ```bash
-csv-analyzer examples/scientific_demo.csv
+varia-studio examples/scientific_demo.csv
 ```
+
+The installed distribution is intentionally still named `csv-analyzer-desktop`
+and the Python namespace remains `csv_analyzer` for compatibility.
 
 For the exact tested Python 3.12 dependency snapshot, install with
 `python -m pip install -c constraints-python312.txt .`. Other Python versions
@@ -170,7 +174,7 @@ xvfb-run -a python -m unittest discover -s tests -v
 Reproduce the large-file check with your separately supplied dataset:
 
 ```bash
-python tools/benchmark.py /path/to/test.csv --output /tmp/csv-analyzer-check
+python tools/benchmark.py /path/to/test.csv --output /tmp/varia-studio-check
 ```
 
 The benchmark writes timings/environment details, statistics CSVs and rendered
