@@ -4,7 +4,9 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
+from csv_analyzer.analysis import build_filter_mask
 from csv_analyzer.data import CancelledError, DataError, ImportOptions, load_dataset
 from csv_analyzer.state import AppState, FilterRule
 
@@ -148,6 +150,107 @@ class ImportTests(unittest.TestCase):
             self.write("date,x\n2026-01-01,1\n"), ImportOptions(date_columns=("date",))
         )
         self.assertEqual(ds.columns[0].kind, "datetime")
+
+    def test_nullable_large_integer_import_preserves_exact_csv_and_dat(self):
+        cases = (
+            (
+                "csv",
+                "id,y\n9007199254740992,1\n9007199254740993,2\n,3\n",
+            ),
+            (
+                "dat",
+                '# id y\n9007199254740992 1\n9007199254740993 2\n"" 3\n',
+            ),
+        )
+        for suffix, content in cases:
+            with self.subTest(suffix=suffix):
+                ds = load_dataset(self.write(content, f"ids.{suffix}"))
+                self.assertEqual(str(ds.frame["id"].dtype), "Int64")
+                self.assertEqual(ds.frame["id"].iloc[0], 2**53)
+                self.assertEqual(ds.frame["id"].iloc[1], 2**53 + 1)
+                self.assertTrue(pd.isna(ds.frame["id"].iloc[2]))
+                self.assertEqual(ds.columns[0].kind, "numeric")
+                self.assertEqual(ds.columns[0].missing, 1)
+                self.assertEqual(
+                    build_filter_mask(
+                        ds.frame,
+                        (FilterRule("id", upper=2**53),),
+                    ).tolist(),
+                    [True, False, False],
+                )
+
+    def test_nullable_integer_limits_and_null_markers(self):
+        cases = (
+            (
+                "signed.csv",
+                f"id,y\n{-2**63},1\n{-2**63 + 1},2\n,3\n",
+                "Int64",
+                [-2**63, -2**63 + 1],
+                FilterRule("id", lower=-2**63 + 1),
+                [False, True, False],
+            ),
+            (
+                "unsigned.csv",
+                f"id,y\n{2**63},1\n{2**64 - 1},2\n,3\n",
+                "UInt64",
+                [2**63, 2**64 - 1],
+                FilterRule("id", upper=2**63),
+                [True, False, False],
+            ),
+            (
+                "small.csv",
+                "id,y\n1,1\nNA,2\n2,3\n",
+                "Int64",
+                [1, 2],
+                FilterRule("id", upper=1),
+                [True, False, False],
+            ),
+        )
+        for name, content, dtype, values, rule, expected in cases:
+            with self.subTest(name=name):
+                ds = load_dataset(self.write(content, name))
+                self.assertEqual(str(ds.frame["id"].dtype), dtype)
+                present = [int(value) for value in ds.frame["id"].dropna().tolist()]
+                self.assertEqual(present, values)
+                self.assertEqual(ds.frame["id"].isna().sum(), 1)
+                self.assertEqual(build_filter_mask(ds.frame, (rule,)).tolist(), expected)
+
+    def test_non_integer_columns_keep_existing_inference(self):
+        path = self.write(
+            "float,scientific,flag,mixed,date,all_missing\n"
+            "1.0,1e3,True,1,2026-01-01,\n"
+            "2.5,2e3,False,text,2026-01-02,\n"
+            ",,,,,\n"
+        )
+        ds = load_dataset(path, ImportOptions(date_columns=("date",)))
+        self.assertEqual(str(ds.frame["float"].dtype), "float64")
+        self.assertEqual(str(ds.frame["scientific"].dtype), "float64")
+        self.assertEqual(str(ds.frame["flag"].dtype), "object")
+        self.assertEqual(str(ds.frame["mixed"].dtype), "object")
+        self.assertEqual(str(ds.frame["all_missing"].dtype), "float64")
+        self.assertEqual(ds.columns[4].kind, "datetime")
+        self.assertEqual(ds.frame["float"].dropna().tolist(), [1.0, 2.5])
+        self.assertEqual(ds.frame["scientific"].dropna().tolist(), [1000.0, 2000.0])
+        self.assertEqual(ds.frame["mixed"].dropna().tolist(), ["1", "text"])
+
+    def test_unrepresentable_nullable_integer_columns_are_rejected(self):
+        cases = (
+            (
+                "above_uint64.csv",
+                f"id,y\n{2**64},1\n{2**64 + 1},2\n,3\n",
+            ),
+            (
+                "mixed_signed_range.csv",
+                f"id,y\n-1,1\n{2**63},2\n,3\n",
+            ),
+        )
+        for name, content in cases:
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(
+                    DataError,
+                    "cannot be represented exactly|64-bit integer",
+                ):
+                    load_dataset(self.write(content, name))
 
     def test_state_atomic_replacement_and_stale_results(self):
         state = AppState()
