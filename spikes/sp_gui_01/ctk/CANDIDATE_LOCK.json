@@ -1,0 +1,11 @@
+{
+  "id": "SP-GUI-01-CTK",
+  "status": "READY_FOR_QA",
+  "toolkit": "CTk/ttk",
+  "common_c0": {
+    "commit": "cfbe01244a7313dce14f28fa3f8f1650281f42d1",
+    "tree": "73b0a3a068ba9dd7859ad1bbfc2f4ed1f0782192"
+  },
+  "rule": "No edits after this lock without reopening the candidate and recording a new identity.",
+  "production_merge": false
+}
