@@ -579,15 +579,16 @@ def export_figure(
     fig: Figure, path: str | Path, *, dpi: int = 300, overwrite: bool = False
 ) -> Path:
     """Write the displayed figure via a temporary file in the destination directory."""
-    path = Path(path).expanduser().resolve()
-    extension = path.suffix.lower().lstrip(".")
+    requested = Path(path).expanduser()
+    resolved = requested.resolve()
+    extension = resolved.suffix.lower().lstrip(".")
     if extension not in ("png", "pdf", "svg"):
         raise DataError("Choose a .png, .pdf, or .svg filename.")
     if not isinstance(dpi, int) or not 50 <= dpi <= 1200:
         raise DataError("Export resolution must be an integer from 50 to 1200 DPI.")
     try:
-        with atomic_destination(path, overwrite=overwrite) as temporary:
+        with atomic_destination(requested, overwrite=overwrite) as temporary:
             fig.savefig(temporary, format=extension, dpi=dpi, bbox_inches="tight")
     except (OSError, ValueError, RuntimeError) as exc:
         raise DataError(f"Could not export the figure: {exc}") from exc
-    return path
+    return resolved
