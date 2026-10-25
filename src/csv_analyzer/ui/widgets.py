@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from decimal import Decimal, InvalidOperation
 import tkinter as tk
 from tkinter import ttk
 
@@ -38,16 +39,23 @@ def button(parent, text, command, *, primary=False, **kwargs):
     )
 
 
-def entry_value(entry, name: str, *, optional=False, integer=False):
+def entry_value(entry, name: str, *, optional=False, integer=False, exact=False):
     text = entry.get().strip()
     if optional and not text:
         return None
     try:
-        value = int(text) if integer else float(text)
+        if integer:
+            value = int(text)
+        elif exact:
+            value = Decimal(text)
+            if value.is_finite() and value == value.to_integral_value():
+                value = int(value)
+        else:
+            value = float(text)
         if not math.isfinite(value):
             raise ValueError
         return value
-    except (ValueError, OverflowError) as exc:
+    except (InvalidOperation, ValueError, OverflowError) as exc:
         raise DataError(f"{name}: enter a finite {'integer' if integer else 'number'}.") from exc
 
 
