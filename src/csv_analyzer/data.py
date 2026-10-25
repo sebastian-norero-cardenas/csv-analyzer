@@ -8,6 +8,7 @@ a second copy of the file in memory.
 from __future__ import annotations
 
 import csv
+import re
 import threading
 import warnings
 from dataclasses import dataclass
@@ -16,7 +17,13 @@ from typing import Callable
 
 import numpy as np
 import pandas as pd
-from pandas.api.types import is_bool_dtype, is_datetime64_any_dtype, is_numeric_dtype
+from pandas.api.types import (
+    is_bool_dtype,
+    is_datetime64_any_dtype,
+    is_float_dtype,
+    is_numeric_dtype,
+    is_object_dtype,
+)
 
 
 class DataError(ValueError):
@@ -96,6 +103,109 @@ def describe_columns(frame: pd.DataFrame) -> tuple[ColumnInfo, ...]:
             ColumnInfo(str(name), str(series.dtype), kind, int(series.isna().sum()), infinite)
         )
     return tuple(columns)
+
+
+_INTEGER_TOKEN = re.compile(r"[+-]?\d+\Z")
+_INT64_MIN = int(np.iinfo(np.int64).min)
+_INT64_MAX = int(np.iinfo(np.int64).max)
+_UINT64_MAX = int(np.iinfo(np.uint64).max)
+
+
+def _nullable_integer_candidates(frame: pd.DataFrame) -> list[str]:
+    """Columns whose inferred dtype may have lost nullable integer semantics."""
+    candidates = []
+    for name, series in frame.items():
+        if is_float_dtype(series.dtype) and series.isna().any():
+            candidates.append(name)
+            continue
+        if not is_object_dtype(series.dtype):
+            continue
+        saw_integer = saw_missing = False
+        plausible = True
+        for value in series:
+            if pd.isna(value):
+                saw_missing = True
+                continue
+            if isinstance(value, str):
+                token = value.strip()
+                if not token:
+                    saw_missing = True
+                    continue
+                if _INTEGER_TOKEN.fullmatch(token):
+                    saw_integer = True
+                    continue
+            plausible = False
+            break
+        if plausible and saw_integer and saw_missing:
+            candidates.append(name)
+    return candidates
+
+
+def _restore_nullable_integer_columns(
+    frame: pd.DataFrame,
+    raw: pd.DataFrame,
+    notices: list[str],
+) -> None:
+    """Rebuild true integer columns from exact source tokens, never from floats."""
+    for name in raw:
+        values: list[object] = []
+        present: list[int] = []
+        missing = False
+        all_integer_tokens = True
+        unsafe_float_integer = False
+        for value in raw[name]:
+            if pd.isna(value):
+                values.append(pd.NA)
+                missing = True
+                continue
+            token = str(value).strip()
+            if not _INTEGER_TOKEN.fullmatch(token):
+                all_integer_tokens = False
+                values.append(token)
+                continue
+            try:
+                parsed = int(token)
+            except ValueError as exc:
+                raise DataError(
+                    f"Column {name!r} contains an integer token too large to validate safely."
+                ) from exc
+            values.append(parsed)
+            present.append(parsed)
+            try:
+                as_float = float(parsed)
+                unsafe_float_integer |= not (
+                    np.isfinite(as_float) and int(as_float) == parsed
+                )
+            except OverflowError:
+                unsafe_float_integer = True
+
+        if not missing or not present:
+            continue
+        if not all_integer_tokens:
+            if is_float_dtype(frame[name].dtype) and unsafe_float_integer:
+                raise DataError(
+                    f"Column {name!r} mixes floating-point values with integer tokens that "
+                    "cannot be represented exactly as float64. Import was stopped to avoid "
+                    "silent numeric corruption."
+                )
+            continue
+
+        minimum, maximum = min(present), max(present)
+        if _INT64_MIN <= minimum and maximum <= _INT64_MAX:
+            dtype = "Int64"
+        elif 0 <= minimum and maximum <= _UINT64_MAX:
+            dtype = "UInt64"
+        else:
+            raise DataError(
+                f"Column {name!r} contains integer values with missing entries that cannot "
+                "be represented exactly as a supported 64-bit integer column. Import was "
+                "stopped to avoid silent numeric corruption."
+            )
+
+        frame[name] = pd.Series(pd.array(values, dtype=dtype), index=frame.index)
+        notices.append(
+            f"Column {name!r}: preserved exact integer values with nullable {dtype}."
+        )
 
 
 def _reject_unicode_nul(fields: list[str], location: str) -> None:
@@ -345,23 +455,38 @@ def load_dataset(
             frame = pd.DataFrame(columns=names)
             notices.append("The file contains column names but no data rows.")
         else:
+            read_options = {
+                "sep": r"\s+" if whitespace else delimiter,
+                "encoding": options.encoding,
+                "header": None,
+                "names": names,
+                "skiprows": skiprows or None,
+                "comment": comment,
+                "decimal": options.decimal,
+                "index_col": False,
+                "on_bad_lines": "error",
+                "float_precision": "round_trip",
+                "low_memory": False,
+            }
             with warnings.catch_warnings(record=True) as captured:
                 warnings.simplefilter("always", pd.errors.DtypeWarning)
-                frame = pd.read_csv(
-                    path,
-                    sep=r"\s+" if whitespace else delimiter,
-                    encoding=options.encoding,
-                    header=None,
-                    names=names,
-                    skiprows=skiprows or None,
-                    comment=comment,
-                    decimal=options.decimal,
-                    index_col=False,
-                    on_bad_lines="error",
-                    float_precision="round_trip",
-                    low_memory=False,
-                )
+                frame = pd.read_csv(path, **read_options)
             notices.extend(str(item.message) for item in captured)
+
+            integer_candidates = _nullable_integer_candidates(frame)
+            if integer_candidates:
+                check_cancelled(cancel)
+                raw_integer_columns = pd.read_csv(
+                    path,
+                    **read_options,
+                    usecols=integer_candidates,
+                    dtype={name: "string" for name in integer_candidates},
+                )
+                if len(raw_integer_columns) != len(frame):
+                    raise DataError(
+                        "The exact integer validation pass disagrees with the parsed row count."
+                    )
+                _restore_nullable_integer_columns(frame, raw_integer_columns, notices)
         if len(frame) != rows:
             raise DataError(
                 "The parser and record scan disagree. Check quoting or comment settings."
