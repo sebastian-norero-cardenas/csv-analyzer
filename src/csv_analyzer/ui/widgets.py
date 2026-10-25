@@ -45,13 +45,13 @@ def entry_value(entry, name: str, *, optional=False, integer=False, exact=False)
         return None
     try:
         if integer:
-            value = int(text)
-        elif exact:
+            return int(text)
+        if exact:
             value = Decimal(text)
-            if value.is_finite() and value == value.to_integral_value():
-                value = int(value)
-        else:
-            value = float(text)
+            if not value.is_finite():
+                raise ValueError
+            return int(value) if value == value.to_integral_value() else value
+        value = float(text)
         if not math.isfinite(value):
             raise ValueError
         return value
