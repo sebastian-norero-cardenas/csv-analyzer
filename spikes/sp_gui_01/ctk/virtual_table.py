@@ -75,6 +75,10 @@ class VirtualTreeTable(ctk.CTkFrame):
             else {}
         )
         self.ordered_ids = np.asarray(ordered_ids, dtype=np.int64)
+        if self._selected_ids:
+            selected = np.fromiter(self._selected_ids, dtype=np.int64)
+            visible_selected = selected[np.isin(selected, self.ordered_ids)]
+            self._selected_ids = set(int(item) for item in visible_selected)
         if not keep_position:
             self.offset = 0
         self.offset = min(self.offset, self._max_offset())
@@ -144,7 +148,7 @@ class VirtualTreeTable(ctk.CTkFrame):
         position = int(positions[0])
         centered = max(0, position - self.window_rows // 2)
         self.offset = min(centered, self._max_offset())
-        self._selected_ids.add(int(source_id))
+        self._selected_ids = {int(source_id)}
         self.refresh()
         for iid, current in self._slot_ids.items():
             if current == int(source_id):
