@@ -115,6 +115,8 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(row["Missing"], 1)
         self.assertEqual(row["Infinite"], 1)
         self.assertEqual(row["Mean"], 2.5e307)
+        self.assertEqual(row["Std"], 5e307)
+        self.assertTrue(np.isinf(row["Variance"]))
         self.assertEqual(row["Min"], 0.0)
         self.assertEqual(row["Max"], 1e308)
         self.assertEqual(row["ddof"], 1)
