@@ -13,6 +13,10 @@ import pandas as pd
 from .data import DataError
 
 
+class ExportConflictError(DataError):
+    """The destination exists and replacement was not authorized."""
+
+
 @contextmanager
 def atomic_destination(
     path: str | Path,
@@ -27,7 +31,9 @@ def atomic_destination(
     else:
         path = requested.parent.resolve() / requested.name
     if not overwrite and os.path.lexists(path):
-        raise DataError("This file already exists. Choose another name or confirm replacement.")
+        raise ExportConflictError(
+            "This file already exists. Choose another name or confirm replacement."
+        )
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(dir=path.parent, suffix=path.suffix, delete=False) as file:
@@ -39,7 +45,7 @@ def atomic_destination(
             try:
                 os.link(temporary, path)
             except FileExistsError as exc:
-                raise DataError(
+                raise ExportConflictError(
                     "This file was created while the export was being prepared. "
                     "Nothing was overwritten; choose another name or confirm replacement."
                 ) from exc
@@ -66,6 +72,8 @@ def export_statistics(frame: pd.DataFrame, path: str | Path, *, overwrite=False)
             destination_resolved=overwrite,
         ) as temporary:
             frame.to_csv(temporary, index=False, encoding="utf-8")
+    except ExportConflictError:
+        raise
     except (OSError, ValueError) as exc:
         raise DataError(f"Could not export statistics: {exc}") from exc
     return resolved
