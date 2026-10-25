@@ -12,12 +12,13 @@ import numpy as np
 import pandas as pd
 
 from spikes.sp_gui_01.common.model import SOURCE_ROW
-from spikes.sp_gui_01.ctk.virtual_table import VirtualTreeTable
 
 try:
     import customtkinter as ctk
+    from spikes.sp_gui_01.ctk.virtual_table import VirtualTreeTable
 except ImportError:
     ctk = None
+    VirtualTreeTable = None
 
 
 @unittest.skipUnless(ctk is not None and os.environ.get("DISPLAY"), "real Tk display required")
