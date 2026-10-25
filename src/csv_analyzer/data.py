@@ -98,6 +98,15 @@ def describe_columns(frame: pd.DataFrame) -> tuple[ColumnInfo, ...]:
     return tuple(columns)
 
 
+def _reject_unicode_nul(fields: list[str], location: str) -> None:
+    for field_number, value in enumerate(fields, 1):
+        if "\x00" in value:
+            raise DataError(
+                f"{location}, field {field_number} contains Unicode NUL (U+0000). "
+                "Repair or remove the NUL character before importing."
+            )
+
+
 def _unique_headers(raw: list[str]) -> tuple[list[str], list[str]]:
     names: list[str] = []
     notices = []
@@ -252,14 +261,26 @@ def load_dataset(
                     if comment and stripped.startswith(comment):
                         if first_nonblank and options.header == "auto":
                             names_raw = _dat_fields(stripped[1:].strip(), None)
+                            _reject_unicode_nul(names_raw, f"Line {line_num}")
                             expected = len(names_raw)
                             commented_header = True
                             ordinary_header = False
+                        elif "\x00" in line:
+                            raise DataError(
+                                f"Line {line_num} contains Unicode NUL (U+0000). "
+                                "Repair or remove the NUL character before importing."
+                            )
                         first_nonblank = False
                         continue
                     first_nonblank = False
                     # Match pandas' whitespace parser; comments end an unquoted record.
                     fields = _dat_fields(line, comment)
+                    _reject_unicode_nul(fields, f"Line {line_num}")
+                    if "\x00" in line:
+                        raise DataError(
+                            f"Line {line_num} contains Unicode NUL (U+0000). "
+                            "Repair or remove the NUL character before importing."
+                        )
                     if not fields:
                         continue
                     if expected is None:
@@ -286,6 +307,9 @@ def load_dataset(
                     record_num += 1
                     if record_num % 2048 == 0:
                         check_cancelled(cancel)
+                    _reject_unicode_nul(
+                        fields, f"Record {record_num} ending on line {reader.line_num}"
+                    )
                     if not lines.has_content:
                         continue
                     if expected is None:
