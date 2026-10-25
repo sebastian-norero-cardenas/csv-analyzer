@@ -380,6 +380,11 @@ class CtkSpikeApp(ctk.CTk):
 
         search_request = self.model.view.search
         search_matches = self.model.view.match_ids
+        search_ids = (
+            self.model.selected_source_ids().copy()
+            if search_request is not None and search_request.scope == SEARCH_SELECTED
+            else self.model.source_ids.copy()
+        )
 
         def work(cancel):
             if cancel.is_set():
@@ -387,6 +392,7 @@ class CtkSpikeApp(ctk.CTk):
             ordered = sort_source_ids(frame, ids, column, descending)
             nav = self._ordered_matches_for(
                 frame,
+                search_ids,
                 search_request,
                 search_matches,
                 column,
@@ -484,6 +490,7 @@ class CtkSpikeApp(ctk.CTk):
             matches = search_source_ids(frame, ids, request, visible)
             nav = self._ordered_matches_for(
                 frame,
+                ids,
                 request,
                 matches,
                 self._sort_column,
@@ -637,6 +644,7 @@ class CtkSpikeApp(ctk.CTk):
     @staticmethod
     def _ordered_matches_for(
         frame,
+        source_ids,
         request,
         matches,
         column,
@@ -645,7 +653,6 @@ class CtkSpikeApp(ctk.CTk):
         if request is None or not matches:
             return ()
         membership = set(int(item) for item in matches)
-        source_ids = np.arange(1, len(frame) + 1, dtype=np.int64)
         ordered = sort_source_ids(frame, source_ids, column, descending)
         return tuple(int(item) for item in ordered if int(item) in membership)
 
