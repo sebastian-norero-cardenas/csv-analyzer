@@ -10,6 +10,27 @@ python -m spikes.sp_gui_01.qt.app /tmp/SP-GUI-01/S-200K-mixed.csv \
   --metrics /tmp/SP-GUI-01/qt-metrics.json
 ```
 
+## Verification commands
+
+```bash
+# Functional-only supplied fixture
+python -m spikes.sp_gui_01.qt.app /path/to/test_sample_500.csv
+
+# Frozen hard gates; reuse the generated corpus rather than regenerating it
+SP_GUI_01_S200K=/tmp/SP-GUI-01/S-200K-mixed.csv \
+  python -m unittest spikes.sp_gui_01.qt.test_hard_gates -v
+
+# Model/view and real-GUI shell checks
+python -m unittest spikes.sp_gui_01.qt.test_qt -v
+
+# Dependency/version/installed-size inventory
+python -m spikes.sp_gui_01.qt.environment
+```
+
+The hard-gate file is byte-identical to the CTk candidate. Headless model checks
+do not count as S01–S16 GUI PASS; keyboard/focus and the DPI matrix require the
+actual Qt GUI environment used by QA.
+
 ## Table strategy
 
 The table is a native `QTableView` backed by `QAbstractTableModel`. The model
