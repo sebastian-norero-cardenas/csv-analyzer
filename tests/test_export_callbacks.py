@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pandas as pd
 from matplotlib.figure import Figure
 
+from csv_analyzer.data import DataError
 from csv_analyzer.ui.plot_panel import PlotPanel
 from csv_analyzer.ui.statistics_tab import StatisticsTab
 
@@ -289,6 +290,25 @@ class ExportCallbackAdapterTests(unittest.TestCase):
                 self.assertEqual(errors, [])
                 self.assertEqual(statuses, [f"Figure exported to {path.resolve()}"])
                 self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_non_conflict_error_is_reported_without_replacement_prompt(self):
+        tab, errors, statuses = self.make_statistics_tab()
+        with (
+            patch(
+                "csv_analyzer.ui.statistics_tab.filedialog.asksaveasfilename",
+                return_value="/tmp/failure.csv",
+            ),
+            patch(
+                "csv_analyzer.ui.statistics_tab.export_statistics",
+                side_effect=DataError("simulated export failure"),
+            ),
+            patch("tkinter.messagebox.askyesno") as confirm,
+        ):
+            StatisticsTab.export(tab)
+        confirm.assert_not_called()
+        self.assertEqual(len(errors), 1)
+        self.assertRegex(str(errors[0]), "simulated export failure")
+        self.assertEqual(statuses, [])
 
     def test_status_uses_destination_returned_by_exporter(self):
         chosen = "/tmp/chosen.csv"
