@@ -586,8 +586,13 @@ def export_figure(
         raise DataError("Choose a .png, .pdf, or .svg filename.")
     if not isinstance(dpi, int) or not 50 <= dpi <= 1200:
         raise DataError("Export resolution must be an integer from 50 to 1200 DPI.")
+    publication_path = resolved if overwrite else requested
     try:
-        with atomic_destination(requested, overwrite=overwrite) as temporary:
+        with atomic_destination(
+            publication_path,
+            overwrite=overwrite,
+            destination_resolved=overwrite,
+        ) as temporary:
             fig.savefig(temporary, format=extension, dpi=dpi, bbox_inches="tight")
     except (OSError, ValueError, RuntimeError) as exc:
         raise DataError(f"Could not export the figure: {exc}") from exc
