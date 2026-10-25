@@ -105,7 +105,7 @@ def describe_columns(frame: pd.DataFrame) -> tuple[ColumnInfo, ...]:
     return tuple(columns)
 
 
-_INTEGER_TOKEN = re.compile(r"[+-]?\\d+\\Z")
+_INTEGER_TOKEN = re.compile(r"[+-]?\d+\Z")
 _INT64_MIN = int(np.iinfo(np.int64).min)
 _INT64_MAX = int(np.iinfo(np.int64).max)
 _UINT64_MAX = int(np.iinfo(np.uint64).max)
@@ -154,7 +154,7 @@ def _restore_nullable_integer_columns(
 ) -> None:
     """Rebuild true integer columns from exact source tokens, never from floats."""
     for name in raw:
-        values: list[int | type(pd.NA)] = []
+        values: list[object] = []
         present: list[int] = []
         missing = False
         integer_tokens = True
