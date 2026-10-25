@@ -59,6 +59,30 @@ class ImportTests(unittest.TestCase):
                 with self.assertRaisesRegex(DataError, "Unicode NUL"):
                     load_dataset(self.write(text, f"{label.replace(' ', '_')}.csv"))
 
+    def test_unicode_nul_is_rejected_in_dat_data_headers_and_comments(self):
+        cases = (
+            (
+                "data field",
+                '"abc\x00def" 1\nxyz 2\n',
+                ImportOptions(header="no"),
+            ),
+            (
+                "commented header",
+                "# na\x00me value\nabc 1\n",
+                ImportOptions(),
+            ),
+            (
+                "ignored comment",
+                "# instrument\x00note\nx y\n1 2\n",
+                ImportOptions(header="yes"),
+            ),
+        )
+        for label, text, options in cases:
+            with self.subTest(label=label):
+                path = self.write(text, f"{label.replace(' ', '_')}.dat")
+                with self.assertRaisesRegex(DataError, "Unicode NUL"):
+                    load_dataset(path, options)
+
     def test_utf16_zero_bytes_are_not_mistaken_for_unicode_nul(self):
         path = self.write("name,value\nalpha,1\nbeta,2\n", "utf16.csv", encoding="utf-16")
         ds = load_dataset(path, ImportOptions(encoding="utf-16", delimiter=","))
