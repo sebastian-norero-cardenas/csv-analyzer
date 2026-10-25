@@ -518,8 +518,8 @@ class CtkSpikeApp(ctk.CTk):
                 ids,
                 request,
                 matches,
-                self._sort_column,
-                self._sort_descending,
+                sort_snapshot[0],
+                sort_snapshot[1],
             )
             return matches, nav
 
