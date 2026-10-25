@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "csv-analyzer-desktop"
-version = "2.0.0"
-description = "A desktop workspace for exploring CSV and scientific DAT datasets"
+version = "2.1.0"
+description = "Varia Studio: a desktop workspace for exploring CSV and scientific DAT datasets"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -19,6 +19,7 @@ dependencies = [
 dev = ["ruff>=0.8", "build>=1.2"]
 
 [project.scripts]
+varia-studio = "csv_analyzer.app:main"
 csv-analyzer = "csv_analyzer.app:main"
 
 [tool.setuptools.packages.find]
