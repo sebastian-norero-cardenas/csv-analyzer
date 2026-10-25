@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import threading
 from decimal import Decimal
+from fractions import Fraction
 
 import numpy as np
 import pandas as pd
@@ -107,28 +108,28 @@ def build_filter_mask(
     return mask
 
 
-def _linear_interpolate(a: float, b: float, fraction: float) -> float:
-    if fraction == 0 or a == b:
+def _linear_interpolate(a: float, b: float, numerator: int) -> float:
+    if numerator == 0 or a == b:
         return float(a)
-    if np.signbit(a) == np.signbit(b):
-        return float(a + (b - a) * fraction)
-    return float(a * (1 - fraction) + b * fraction)
+    left = Fraction.from_float(float(a))
+    right = Fraction.from_float(float(b))
+    return float(((4 - numerator) * left + numerator * right) / 4)
 
 
 def _linear_quartiles(values: np.ndarray) -> tuple[float, float, float]:
-    """Q1/median/Q3 using exact quartile positions and stable pair interpolation."""
+    """Q1/median/Q3 using exact quartile positions and one final float rounding."""
     n = len(values)
     positions = []
     indices = []
     for numerator in (1, 2, 3):
         lower, remainder = divmod((n - 1) * numerator, 4)
         upper = lower if remainder == 0 else lower + 1
-        positions.append((lower, upper, remainder / 4))
+        positions.append((lower, upper, remainder))
         indices.extend((lower, upper))
     partitioned = np.partition(values, np.unique(indices))
     return tuple(
-        _linear_interpolate(partitioned[lower], partitioned[upper], fraction)
-        for lower, upper, fraction in positions
+        _linear_interpolate(partitioned[lower], partitioned[upper], numerator)
+        for lower, upper, numerator in positions
     )
 
 
