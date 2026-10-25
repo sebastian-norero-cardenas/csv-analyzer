@@ -73,11 +73,15 @@ class CtkSpikeApp(ctk.CTk):
         self._plot_canvas = None
         self._plot_toolbar = None
         self._plot_revision: int | None = None
+        self._search_ordered_matches: tuple[int, ...] = ()
+        self._resize_after = None
+        self._last_size = None
         self._build_shell()
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Control-o>", lambda event: self.open_file())
         self.bind("<Control-f>", lambda event: self.search_entry.focus_set())
         self.bind("<Escape>", lambda event: self.cancel_current())
+        self.bind("<Configure>", self._resize_event)
         self.update_idletasks()
         self._record("startup", started, toolkit="ctk")
 
@@ -214,6 +218,9 @@ class CtkSpikeApp(ctk.CTk):
             frame,
             on_sort=self.request_sort,
             on_selection=self._visual_selection_changed,
+            on_scroll=lambda seconds: self._record_duration(
+                "scroll", seconds, rows=len(self._ordered_ids)
+            ),
         )
         self.table.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
         return frame
@@ -306,6 +313,7 @@ class CtkSpikeApp(ctk.CTk):
         self._update_dataset_controls()
         self._update_counts()
         self.match_label.configure(text="0 matches")
+        self._search_ordered_matches = ()
         self.plot_state.configure(text="No plot")
         self._plot_revision = None
         self._set_status(f"Loaded {dataset.path.name}")
@@ -370,14 +378,27 @@ class CtkSpikeApp(ctk.CTk):
         descending = self._sort_descending
         started = time.perf_counter()
 
+        search_request = self.model.view.search
+        search_matches = self.model.view.match_ids
+
         def work(cancel):
             if cancel.is_set():
                 raise CancelledError()
-            return sort_source_ids(frame, ids, column, descending)
+            ordered = sort_source_ids(frame, ids, column, descending)
+            nav = self._ordered_matches_for(
+                frame,
+                search_request,
+                search_matches,
+                column,
+                descending,
+            )
+            return ordered, nav
 
-        def success(ordered):
+        def success(result):
+            ordered, nav = result
             self._record(event, started, rows=len(ids))
             self._ordered_ids = ordered
+            self._search_ordered_matches = nav
             self.table.set_data(
                 frame,
                 self.model.view.visible_columns,
@@ -460,15 +481,25 @@ class CtkSpikeApp(ctk.CTk):
         def work(cancel):
             if cancel.is_set():
                 raise CancelledError()
-            return search_source_ids(frame, ids, request, visible)
+            matches = search_source_ids(frame, ids, request, visible)
+            nav = self._ordered_matches_for(
+                frame,
+                request,
+                matches,
+                self._sort_column,
+                self._sort_descending,
+            )
+            return matches, nav
 
-        def success(matches):
+        def success(result):
+            matches, nav = result
             self._record(
                 "search", started, rows=len(ids), matches=len(matches)
             )
             self.model.view.search = request
             self.model.view.match_ids = matches
             self.model.view.match_cursor = -1
+            self._search_ordered_matches = nav
             self.match_label.configure(text=f"{len(matches):,} matches")
             self._set_status("Ready")
             if matches:
@@ -480,23 +511,7 @@ class CtkSpikeApp(ctk.CTk):
         matches = self.model.view.match_ids
         if not matches:
             return
-        membership = set(matches)
-        if (
-            self.model.view.search
-            and self.model.view.search.scope == SEARCH_WHOLE
-        ):
-            base_ids = self.model.source_ids
-        else:
-            base_ids = self.model.selected_source_ids()
-        ordered = sort_source_ids(
-            self.model.dataset.frame,
-            base_ids,
-            self._sort_column,
-            self._sort_descending,
-        )
-        ordered_matches = [
-            int(item) for item in ordered if int(item) in membership
-        ]
+        ordered_matches = list(self._search_ordered_matches or matches)
         cursor = self.model.view.match_cursor
         current = (
             self.model.view.match_ids[cursor]
@@ -532,6 +547,7 @@ class CtkSpikeApp(ctk.CTk):
         self.model.clear_search()
         self.search_entry.delete(0, "end")
         self.match_label.configure(text="0 matches")
+        self._search_ordered_matches = ()
         self._set_status("Search cleared")
 
     def _visual_selection_changed(
@@ -617,6 +633,21 @@ class CtkSpikeApp(ctk.CTk):
             if self.model.view.search is not None:
                 self.run_search()
             self._refresh_order_async(event="filter_view")
+
+    @staticmethod
+    def _ordered_matches_for(
+        frame,
+        request,
+        matches,
+        column,
+        descending,
+    ) -> tuple[int, ...]:
+        if request is None or not matches:
+            return ()
+        membership = set(int(item) for item in matches)
+        source_ids = np.arange(1, len(frame) + 1, dtype=np.int64)
+        ordered = sort_source_ids(frame, source_ids, column, descending)
+        return tuple(int(item) for item in ordered if int(item) in membership)
 
     def _mark_plot_dirty(self) -> None:
         if self._plot_figure is not None:
@@ -745,6 +776,27 @@ class CtkSpikeApp(ctk.CTk):
             self.cancel_job("load")
         elif self.jobs.jobs:
             self.cancel_job(next(iter(self.jobs.jobs)))
+
+    def _resize_event(self, event) -> None:
+        if event.widget is not self:
+            return
+        size = (event.width, event.height)
+        if size == self._last_size:
+            return
+        self._last_size = size
+        if self._resize_after is not None:
+            try:
+                self.after_cancel(self._resize_after)
+            except TclError:
+                pass
+        started = time.perf_counter()
+        self._resize_after = self.after(
+            120,
+            lambda: self._record("resize", started, width=size[0], height=size[1]),
+        )
+
+    def _record_duration(self, event: str, seconds: float, **metadata) -> None:
+        self.samples.append(Sample(event, seconds, current_rss_kib(), metadata))
 
     def _set_status(self, text: str) -> None:
         self.status.configure(text=text)
