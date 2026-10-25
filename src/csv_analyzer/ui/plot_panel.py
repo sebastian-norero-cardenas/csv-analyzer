@@ -7,6 +7,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 
 from .. import config as C
 from ..plots import export_figure
+from .exporting import export_with_confirmation
 from .widgets import button, label
 
 
@@ -146,7 +147,17 @@ class PlotPanel(ctk.CTkFrame):
         if not path:
             return
         try:
-            export_figure(self.figure, path, dpi=int(self.dpi.get().split()[0]), overwrite=True)
-            self.app.set_status(f"Figure exported to {path}")
+            published = export_with_confirmation(
+                self,
+                path,
+                lambda overwrite: export_figure(
+                    self.figure,
+                    path,
+                    dpi=int(self.dpi.get().split()[0]),
+                    overwrite=overwrite,
+                ),
+            )
+            if published is not None:
+                self.app.set_status(f"Figure exported to {published}")
         except Exception as exc:
             self.app.show_error(exc)

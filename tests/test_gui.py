@@ -2,10 +2,12 @@
 
 import os
 import sys
+import tempfile
 import time
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 from csv_analyzer.app import Application
 from csv_analyzer.data import DataError
@@ -157,6 +159,70 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(r.panel.export_button.cget("state"), "disabled")
 
         r.panel.clear()  # Idempotent after a complete teardown.
+
+    def test_real_widgets_do_not_replace_without_explicit_confirmation(self):
+        self.load("scientific_demo.csv")
+        relationships = self.app.relationships_tab
+        statistics = self.app.statistics_tab
+
+        relationships.plot()
+        self.finish_jobs()
+        self.app.tabs.set("Statistics")
+        statistics.compute()
+        self.finish_jobs()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            csv_path = root / "existing.csv"
+            png_path = root / "existing.png"
+            csv_path.write_bytes(b"CSV OTHER")
+            png_path.write_bytes(b"PNG OTHER")
+
+            with (
+                patch(
+                    "csv_analyzer.ui.statistics_tab.filedialog.asksaveasfilename",
+                    return_value=str(csv_path),
+                ),
+                patch("tkinter.messagebox.askyesno", return_value=False) as confirm,
+            ):
+                statistics.export()
+            self.assertEqual(csv_path.read_bytes(), b"CSV OTHER")
+            confirm.assert_called_once()
+
+            with (
+                patch(
+                    "csv_analyzer.ui.plot_panel.filedialog.asksaveasfilename",
+                    return_value=str(png_path),
+                ),
+                patch("tkinter.messagebox.askyesno", return_value=False) as confirm,
+            ):
+                relationships.panel.export()
+            self.assertEqual(png_path.read_bytes(), b"PNG OTHER")
+            confirm.assert_called_once()
+
+            with (
+                patch(
+                    "csv_analyzer.ui.statistics_tab.filedialog.asksaveasfilename",
+                    return_value=str(csv_path),
+                ),
+                patch("tkinter.messagebox.askyesno", return_value=True) as confirm,
+            ):
+                statistics.export()
+            self.assertNotEqual(csv_path.read_bytes(), b"CSV OTHER")
+            confirm.assert_called_once()
+
+            with (
+                patch(
+                    "csv_analyzer.ui.plot_panel.filedialog.asksaveasfilename",
+                    return_value=str(png_path),
+                ),
+                patch("tkinter.messagebox.askyesno", return_value=True) as confirm,
+            ):
+                relationships.panel.export()
+            self.assertNotEqual(png_path.read_bytes(), b"PNG OTHER")
+            confirm.assert_called_once()
+
+        self.assertEqual(self.errors, [])
 
     def test_close_after_plot(self):
         self.load("scientific_demo.csv")
