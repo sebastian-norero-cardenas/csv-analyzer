@@ -1,3 +1,3 @@
-"""CSV Analyzer. Importing this package does not initialize a GUI."""
+"""Varia Studio. Importing this package does not initialize a GUI."""
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
