@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+import time
 
 import customtkinter as ctk
 import numpy as np
@@ -21,11 +22,13 @@ class VirtualTreeTable(ctk.CTkFrame):
         window_rows: int = 120,
         on_sort: Callable[[str], None] | None = None,
         on_selection: Callable[[tuple[int, ...]], None] | None = None,
+        on_scroll: Callable[[float], None] | None = None,
     ):
         super().__init__(master, fg_color="transparent")
         self.window_rows = window_rows
         self.on_sort = on_sort or (lambda column: None)
         self.on_selection = on_selection or (lambda source_ids: None)
+        self.on_scroll = on_scroll or (lambda seconds: None)
         self.frame: pd.DataFrame | None = None
         self.columns: tuple[str, ...] = ()
         self.ordered_ids = np.array([], dtype=np.int64)
@@ -200,6 +203,7 @@ class VirtualTreeTable(ctk.CTkFrame):
     def _scroll_command(self, *args) -> None:
         if not args:
             return
+        started = time.perf_counter()
         if args[0] == "moveto":
             self.offset = int(round(float(args[1]) * self._max_offset()))
         elif args[0] == "scroll":
@@ -209,14 +213,17 @@ class VirtualTreeTable(ctk.CTkFrame):
             self.offset += (-1 if count < 0 else 1) * step
         self.offset = min(max(0, self.offset), self._max_offset())
         self.refresh()
+        self.on_scroll(time.perf_counter() - started)
 
     def _mousewheel(self, event):
         self._scroll_units((-1 if event.delta > 0 else 1) * 3)
         return "break"
 
     def _scroll_units(self, amount: int):
+        started = time.perf_counter()
         self.offset = min(max(0, self.offset + amount), self._max_offset())
         self.refresh()
+        self.on_scroll(time.perf_counter() - started)
         return "break"
 
     def _page(self, direction: int):
