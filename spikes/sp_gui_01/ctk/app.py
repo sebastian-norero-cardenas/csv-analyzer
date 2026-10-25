@@ -80,6 +80,7 @@ class CtkSpikeApp(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Control-o>", lambda event: self.open_file())
         self.bind("<Control-f>", lambda event: self.search_entry.focus_set())
+        self.bind("<Control-r>", lambda event: self.reload_file())
         self.bind("<Escape>", lambda event: self.cancel_current())
         self.bind("<Configure>", self._resize_event)
         self.update_idletasks()
@@ -133,7 +134,7 @@ class CtkSpikeApp(ctk.CTk):
 
     def _build_data_area(self, master):
         frame = ctk.CTkFrame(master)
-        frame.grid_rowconfigure(2, weight=1)
+        frame.grid_rowconfigure(3, weight=1)
         frame.grid_columnconfigure(0, weight=1)
 
         row1 = ctk.CTkFrame(frame, fg_color="transparent")
@@ -200,18 +201,20 @@ class CtkSpikeApp(ctk.CTk):
             row2, text="Clear search", width=88, command=self.clear_search
         ).pack(side="left", padx=(0, 8))
 
-        ctk.CTkLabel(row2, text="Filter >=").pack(side="left")
-        self.filter_column = ctk.CTkOptionMenu(row2, values=[""], width=120)
-        self.filter_column.pack(side="left", padx=3)
+        filter_row = ctk.CTkFrame(frame, fg_color="transparent")
+        filter_row.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 6))
+        ctk.CTkLabel(filter_row, text="Filter >=").pack(side="left")
+        self.filter_column = ctk.CTkOptionMenu(filter_row, values=[""], width=150)
+        self.filter_column.pack(side="left", padx=4)
         self.filter_value = ctk.CTkEntry(
-            row2, width=82, placeholder_text="value"
+            filter_row, width=100, placeholder_text="value"
         )
         self.filter_value.pack(side="left")
         ctk.CTkButton(
-            row2, text="Apply", width=58, command=self.apply_filter
-        ).pack(side="left", padx=3)
+            filter_row, text="Apply", width=64, command=self.apply_filter
+        ).pack(side="left", padx=4)
         ctk.CTkButton(
-            row2, text="Clear", width=58, command=self.clear_filter
+            filter_row, text="Clear", width=64, command=self.clear_filter
         ).pack(side="left")
 
         self.table = VirtualTreeTable(
@@ -222,7 +225,7 @@ class CtkSpikeApp(ctk.CTk):
                 "scroll", seconds, rows=len(self._ordered_ids)
             ),
         )
-        self.table.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        self.table.grid(row=3, column=0, sticky="nsew", padx=8, pady=(0, 8))
         return frame
 
     def _build_chart_area(self, master):
@@ -269,6 +272,10 @@ class CtkSpikeApp(ctk.CTk):
         if path:
             self.load_path(Path(path))
 
+    def reload_file(self) -> None:
+        if self._active_path is not None:
+            self.load_path(self._active_path)
+
     def load_path(self, path: Path) -> None:
         ticket = self.model.begin_load()
         options = (
@@ -290,12 +297,19 @@ class CtkSpikeApp(ctk.CTk):
             self._dataset_committed()
 
         def failure(error):
-            if not isinstance(error, CancelledError):
-                self._show_error(f"Could not load {path.name}: {error}")
+            if isinstance(error, CancelledError):
+                return
+            suffix = (
+                f" Active dataset {self._active_path.name} is unchanged."
+                if self._active_path is not None
+                else ""
+            )
+            self._show_error(f"Could not load {path.name}: {error}.{suffix}")
 
         self.jobs.submit("load", work, success, failure)
 
     def _dataset_committed(self) -> None:
+        paint_started = time.perf_counter()
         dataset = self.model.dataset
         frame = dataset.frame
         columns = self._visible_columns_for(frame)
@@ -318,7 +332,9 @@ class CtkSpikeApp(ctk.CTk):
         self._plot_revision = None
         self._set_status(f"Loaded {dataset.path.name}")
         self.after_idle(
-            lambda: self._record_now("first_paint", dataset=dataset.path.name)
+            lambda: self._record(
+                "first_paint", paint_started, dataset=dataset.path.name
+            )
         )
 
     def _visible_columns_for(self, frame) -> tuple[str, ...]:
@@ -758,6 +774,10 @@ class CtkSpikeApp(ctk.CTk):
                 f"{visual:,} visually selected"
             )
         )
+        if selected == 0:
+            self._set_status(
+                f"0 selected / {total:,} total — Clear filter to restore rows."
+            )
 
     def _activity_changed(self, busy: bool) -> None:
         if self._closed:
