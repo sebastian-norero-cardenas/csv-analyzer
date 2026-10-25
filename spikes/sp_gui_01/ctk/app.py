@@ -277,6 +277,8 @@ class CtkSpikeApp(ctk.CTk):
             self.load_path(self._active_path)
 
     def load_path(self, path: Path) -> None:
+        for key in ("filter", "search", "order", "plot"):
+            self.jobs.cancel(key)
         ticket = self.model.begin_load()
         options = (
             s200k_import_options()
@@ -384,7 +386,11 @@ class CtkSpikeApp(ctk.CTk):
         self._refresh_order_async(event="scope")
 
     def _refresh_order_async(
-        self, *, focus_id: int | None = None, event: str = "sort"
+        self,
+        *,
+        focus_id: int | None = None,
+        event: str = "sort",
+        after=None,
     ) -> None:
         if self.model.dataset is None:
             return
@@ -432,6 +438,8 @@ class CtkSpikeApp(ctk.CTk):
             if focus_id is not None:
                 self.table.focus_source_id(focus_id)
             self._set_status("Ready")
+            if after is not None:
+                after()
 
         self.jobs.submit("order", work, success, self._show_error)
 
@@ -497,6 +505,7 @@ class CtkSpikeApp(ctk.CTk):
             else self.model.source_ids
         )
         visible = self.model.view.visible_columns
+        sort_snapshot = (self._sort_column, self._sort_descending)
         started = time.perf_counter()
         self._set_status("Searching…")
 
@@ -525,6 +534,9 @@ class CtkSpikeApp(ctk.CTk):
             self._search_ordered_matches = nav
             self.match_label.configure(text=f"{len(matches):,} matches")
             self._set_status("Ready")
+            if sort_snapshot != (self._sort_column, self._sort_descending):
+                self._refresh_order_async(event="search_reorder")
+                return
             if matches:
                 self.navigate_match(1)
 
@@ -623,6 +635,8 @@ class CtkSpikeApp(ctk.CTk):
         except ValueError:
             self._show_error("Enter a numeric lower-bound filter value.")
             return
+        self.jobs.cancel("order")
+        self.jobs.cancel("search")
         revision = self.model.app_state.revision
         frame = self.model.dataset.frame
         rule = FilterRule(column, lower=value)
@@ -640,9 +654,11 @@ class CtkSpikeApp(ctk.CTk):
             self._record("filter", started, selected=int(mask.sum()))
             self.model.view.dirty_plot = True
             self._mark_plot_outdated()
-            if self.model.view.search is not None:
-                self.run_search()
-            self._refresh_order_async(event="filter_view")
+            search_active = self.model.view.search is not None
+            self._refresh_order_async(
+                event="filter_view",
+                after=self.run_search if search_active else None,
+            )
 
         self.jobs.submit("filter", work, success, self._show_error)
 
@@ -651,11 +667,15 @@ class CtkSpikeApp(ctk.CTk):
             return
         revision = self.model.app_state.revision
         if self.model.app_state.commit_filters(revision, (), None):
+            self.jobs.cancel("order")
+            self.jobs.cancel("search")
             self.model.view.dirty_plot = True
             self._mark_plot_outdated()
-            if self.model.view.search is not None:
-                self.run_search()
-            self._refresh_order_async(event="filter_view")
+            search_active = self.model.view.search is not None
+            self._refresh_order_async(
+                event="filter_view",
+                after=self.run_search if search_active else None,
+            )
 
     @staticmethod
     def _ordered_matches_for(
