@@ -1,0 +1,170 @@
+name: SP-GUI-01 Qt install focal
+
+on:
+  push:
+    branches:
+      - spike/sp-gui-01-qt-install
+
+permissions:
+  contents: read
+
+jobs:
+  verify-packaging:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout focal branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install experimental Ubuntu Qt runtime dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          xargs -a spikes/sp_gui_01/qt_install/ubuntu-runtime-packages.txt \
+            sudo apt-get install -y
+
+      - name: Verify focal ancestry and build wheel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD^)" = "9d54772c295e794747e60ebd50b582b6a393a0d4"
+          python spikes/sp_gui_01/qt_install/build_wheel.py --output dist
+          sha256sum dist/*.whl | tee dist/SHA256SUMS
+
+      - name: Create packaging-only 500x61 launch probe
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/varia-qt-runtime
+          python - <<'PY' | tee /tmp/varia-qt-runtime/probe.sha256
+          import csv
+          import hashlib
+          from pathlib import Path
+
+          path = Path("/tmp/varia-qt-runtime/package_probe_500x61.csv")
+          columns = [f"col_{index:02d}" for index in range(61)]
+          with path.open("w", newline="", encoding="utf-8") as handle:
+              writer = csv.writer(handle, lineterminator="\n")
+              writer.writerow(columns)
+              for row in range(500):
+                  writer.writerow([row * 1000 + column for column in range(61)])
+          print(hashlib.sha256(path.read_bytes()).hexdigest())
+          PY
+          cp spikes/sp_gui_01/qt_install/smoke_installed.py /tmp/varia-qt-runtime/
+
+      - name: Clean install and metadata verification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m venv /tmp/varia-qt-clean
+          /tmp/varia-qt-clean/bin/python -m pip install --upgrade pip
+          /tmp/varia-qt-clean/bin/pip install dist/*.whl
+          (
+            cd /tmp/varia-qt-runtime
+            env -u PYTHONPATH /tmp/varia-qt-clean/bin/python - <<'PY'
+          import importlib.metadata as md
+          import os
+          from pathlib import Path
+          import PySide6
+          import csv_analyzer
+          import spikes
+
+          workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          dist = md.distribution("varia-studio-sp-gui-01-qt")
+          print("distribution=" + dist.metadata["Name"])
+          print("version=" + dist.version)
+          print("requires=" + repr(dist.requires))
+          print("pyside6=" + PySide6.__version__)
+          print("cwd=" + str(Path.cwd()))
+          print("PYTHONPATH=" + repr(os.environ.get("PYTHONPATH")))
+          print("spikes_origin=" + str(Path(spikes.__file__).resolve()))
+          print("csv_analyzer_origin=" + str(Path(csv_analyzer.__file__).resolve()))
+
+          assert dist.version == "0.1.0"
+          assert PySide6.__version__ == "6.12.0"
+          assert os.environ.get("PYTHONPATH") is None
+          assert Path.cwd().resolve() != workspace
+          for module in (spikes, csv_analyzer):
+              origin = Path(module.__file__).resolve()
+              assert origin != workspace and workspace not in origin.parents
+              assert str(origin).startswith("/tmp/varia-qt-clean/")
+          PY
+          )
+          /tmp/varia-qt-clean/bin/pip check
+
+      - name: Module help outside checkout with no PYTHONPATH
+        shell: bash
+        run: |
+          set -euxo pipefail
+          (
+            cd /tmp/varia-qt-runtime
+            env -u PYTHONPATH \
+              /tmp/varia-qt-clean/bin/python -m spikes.sp_gui_01.qt.app --help
+          ) | tee dist/help.txt
+
+      - name: Real Qt launch outside checkout
+        shell: bash
+        run: |
+          set -euxo pipefail
+          PROBE_SHA="$(cat /tmp/varia-qt-runtime/probe.sha256)"
+          (
+            cd /tmp/varia-qt-runtime
+            env -u PYTHONPATH xvfb-run -a \
+              /tmp/varia-qt-clean/bin/python smoke_installed.py \
+              package_probe_500x61.csv --expected-sha256 "$PROBE_SHA"
+          ) | tee dist/smoke.txt
+
+      - name: Record Ubuntu evidence
+        shell: bash
+        run: |
+          {
+            echo "commit=$(git rev-parse HEAD)"
+            echo "parent=$(git rev-parse HEAD^)"
+            echo "tree=$(git rev-parse HEAD^{tree})"
+            echo "runner_os=$RUNNER_OS"
+            echo "python=$(/tmp/varia-qt-clean/bin/python --version 2>&1)"
+            echo "pip=$(/tmp/varia-qt-clean/bin/pip --version)"
+            echo "pyside6=$(/tmp/varia-qt-clean/bin/python -c 'import PySide6; print(PySide6.__version__)')"
+          } | tee dist/environment.txt
+
+      - name: Upload focal wheel and Ubuntu evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sp-gui-01-qt-install
+          path: |
+            dist/*.whl
+            dist/SHA256SUMS
+            dist/help.txt
+            dist/smoke.txt
+            dist/environment.txt
+          if-no-files-found: error
+
+      - name: Set up Python 3.13 for offline verification wheelhouse
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download Python 3.13 wheelhouse
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p dist/wheelhouse-py313
+          python -m pip download --only-binary=:all: \
+            --dest dist/wheelhouse-py313 dist/*.whl
+          ls -lh dist/wheelhouse-py313
+
+      - name: Upload Python 3.13 wheelhouse
+        uses: actions/upload-artifact@v4
+        with:
+          name: sp-gui-01-qt-wheelhouse-py313
+          path: dist/wheelhouse-py313/*.whl
+          if-no-files-found: error
