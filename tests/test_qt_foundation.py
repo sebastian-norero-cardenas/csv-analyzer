@@ -448,14 +448,24 @@ class CoordinatorContractTests(unittest.TestCase):
         entered = threading.Event()
         release = threading.Event()
         seen = []
-        receiver = QObject()
+
+        class Receiver(QObject):
+            def handle(self, value):
+                seen.append(value)
+
+        receiver = Receiver()
 
         def work(cancel):
             entered.set()
             release.wait(timeout=5)
             return 1
 
-        coordinator.submit_task("receiver", work, success=seen.append, receiver=receiver)
+        coordinator.submit_task(
+            "receiver",
+            work,
+            success=receiver.handle,
+            receiver=receiver,
+        )
         self.assertTrue(entered.wait(timeout=2))
         del receiver
         gc.collect()

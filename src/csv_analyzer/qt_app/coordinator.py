@@ -38,11 +38,32 @@ class Lifecycle(Enum):
     CLOSED = auto()
 
 
+Callback = Callable[[Any], None]
+StoredCallback = Callback | weakref.WeakMethod | None
+
+
+def _store_callback(callback: Callback | None) -> StoredCallback:
+    if callback is None:
+        return None
+    if getattr(callback, "__self__", None) is not None:
+        try:
+            return weakref.WeakMethod(callback)
+        except TypeError:
+            pass
+    return callback
+
+
+def _resolve_callback(callback: StoredCallback) -> Callback | None:
+    if isinstance(callback, weakref.WeakMethod):
+        return callback()
+    return callback
+
+
 @dataclass
 class _Publication:
     token: TaskToken
-    success: Callable[[Any], None] | None
-    failure: Callable[[BaseException], None] | None
+    success: StoredCallback
+    failure: StoredCallback
     receiver: weakref.ReferenceType[QObject] | None
 
 
@@ -121,7 +142,12 @@ class QtCoordinator(QObject):
             return None
 
         target = weakref.ref(receiver) if receiver is not None else None
-        self._publications[key] = _Publication(token, success, failure, target)
+        self._publications[key] = _Publication(
+            token,
+            _store_callback(success),
+            _store_callback(failure),
+            target,
+        )
         return token
 
     @Slot()
@@ -243,9 +269,10 @@ class QtCoordinator(QObject):
 
         if outcome.status is TaskStatus.CANCELLED:
             return
-        callback = (
+        stored_callback = (
             publication.failure if outcome.status is TaskStatus.ERROR else publication.success
         )
+        callback = _resolve_callback(stored_callback)
         if callback is None:
             if outcome.status is TaskStatus.ERROR and outcome.error is not None:
                 self._present_error(outcome.error)

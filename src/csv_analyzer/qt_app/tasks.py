@@ -96,7 +96,7 @@ class _Runnable(QRunnable):
         except CancelledError as exc:
             status = TaskStatus.CANCELLED
             error = exc
-        except BaseException as exc:
+        except Exception as exc:
             status = TaskStatus.ERROR
             error = exc
         self.bridge.outcome.emit(
