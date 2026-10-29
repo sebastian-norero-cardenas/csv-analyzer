@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import Any
 
 QT_EXTRA_MESSAGE = (
-    "PySide6 is required for the Qt interface. "
-    "Install Varia Studio with the 'qt' extra."
+    "PySide6 is required for the Qt interface. Install Varia Studio with the 'qt' extra."
 )
 
 
