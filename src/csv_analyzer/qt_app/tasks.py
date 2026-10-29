@@ -288,7 +288,11 @@ class QtTaskRunner(QObject):
     def _on_worker_outcome(self, outcome: TaskOutcome) -> None:
         token = outcome.token
         self._active.pop((token.key, token.generation), None)
+        # Keep the generation current while the GUI-thread coordinator validates
+        # and publishes this outcome. A callback may submit a replacement.
         self.outcome_ready.emit(outcome)
+        if self._logical.get(token.key) == token.generation:
+            self._logical.pop(token.key, None)
         self._schedule()
         self._emit_activity()
         if self._closing and not self._active:
