@@ -13,6 +13,7 @@ dependencies = [
     "pandas>=2.2,<4",
     "numpy>=1.26,<3",
     "matplotlib>=3.8,<4",
+    "PySide6>=6.11.3,<6.13",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +22,7 @@ dev = ["ruff>=0.8", "build>=1.2"]
 [project.scripts]
 varia-studio = "csv_analyzer.app:main"
 csv-analyzer = "csv_analyzer.app:main"
+varia-studio-qt = "csv_analyzer.qt_app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
