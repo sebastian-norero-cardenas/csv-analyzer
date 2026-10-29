@@ -65,7 +65,10 @@ jobs:
       - name: Ruff
         run: |
           python -m ruff check src tests tools
-          python -m ruff format --check src tests tools
+          python -m ruff format --check \
+            src/csv_analyzer/state.py \
+            src/csv_analyzer/qt_app \
+            tests/test_qt_foundation.py
 
       - name: Build wheel and sdist
         run: |

@@ -87,9 +87,7 @@ class StateContractTests(unittest.TestCase):
             )
 
             rules = (FilterRule("x", lower=2),)
-            self.assertTrue(
-                state.commit_filters(state.revision, rules, np.array([False, True]))
-            )
+            self.assertTrue(state.commit_filters(state.revision, rules, np.array([False, True])))
             self.assertEqual(
                 (state.revision, state.dataset_revision, state.selection_revision),
                 (2, 1, 2),
@@ -425,8 +423,10 @@ class CoordinatorContractTests(unittest.TestCase):
 
             coordinator.load_path(a)
             pump_until(
-                lambda: coordinator.state.dataset is not None
-                and coordinator.state.dataset.path.name == "a.csv"
+                lambda: (
+                    coordinator.state.dataset is not None
+                    and coordinator.state.dataset.path.name == "a.csv"
+                )
             )
             coordinator.load_path(b)
             self.assertTrue(entered_b.wait(timeout=2))
@@ -436,8 +436,10 @@ class CoordinatorContractTests(unittest.TestCase):
             release_b.set()
             pump_until(lambda: started_c.is_set())
             pump_until(
-                lambda: coordinator.state.dataset is not None
-                and coordinator.state.dataset.path.name == "c.csv"
+                lambda: (
+                    coordinator.state.dataset is not None
+                    and coordinator.state.dataset.path.name == "c.csv"
+                )
             )
             self.assertEqual(coordinator.state.dataset.frame.iloc[0, 0], 3)
 

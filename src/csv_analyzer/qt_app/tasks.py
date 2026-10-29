@@ -206,9 +206,7 @@ class QtTaskRunner(QObject):
         else:
             if len(self._queued) >= self.max_pending:
                 self._logical.pop(key, None)
-                raise TaskQueueFull(
-                    f"Task queue is full ({self.max_pending} pending requests)."
-                )
+                raise TaskQueueFull(f"Task queue is full ({self.max_pending} pending requests).")
             self._queued[key] = request
 
         self._emit_activity()
@@ -261,9 +259,7 @@ class QtTaskRunner(QObject):
         group = request.token.exclusive_group
         if group is None:
             return True
-        return not any(
-            active.token.exclusive_group == group for active in self._active.values()
-        )
+        return not any(active.token.exclusive_group == group for active in self._active.values())
 
     def _start(self, request: _Request) -> None:
         key = (request.token.key, request.token.generation)

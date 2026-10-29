@@ -243,7 +243,9 @@ class QtCoordinator(QObject):
 
         if outcome.status is TaskStatus.CANCELLED:
             return
-        callback = publication.failure if outcome.status is TaskStatus.ERROR else publication.success
+        callback = (
+            publication.failure if outcome.status is TaskStatus.ERROR else publication.success
+        )
         if callback is None:
             if outcome.status is TaskStatus.ERROR and outcome.error is not None:
                 self._present_error(outcome.error)
