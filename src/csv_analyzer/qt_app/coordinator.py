@@ -197,11 +197,11 @@ class QtCoordinator(QObject):
         self.application_epoch += 1
         self.state.cancel_load()
         self._publications.clear()
-        self.runner.begin_closing()
         shell = self._shell()
         if shell is not None:
             shell.begin_closing(self.runner.activity.physical)
-        if self.runner.activity.physical == 0:
+        self.runner.begin_closing()
+        if self.lifecycle is Lifecycle.CLOSING and self.runner.activity.physical == 0:
             self._finalize_close()
 
     def _accept(self, publication: _Publication, outcome: TaskOutcome) -> bool:
@@ -233,9 +233,13 @@ class QtCoordinator(QObject):
             raise RuntimeError("Task publication left the Qt GUI thread.")
 
         publication = self._publications.get(outcome.token.key)
-        if publication is None or not self._accept(publication, outcome):
+        if publication is None:
             return
-        self._publications.pop(outcome.token.key, None)
+        accepted = self._accept(publication, outcome)
+        if publication.token == outcome.token:
+            self._publications.pop(outcome.token.key, None)
+        if not accepted:
+            return
 
         if outcome.status is TaskStatus.CANCELLED:
             return

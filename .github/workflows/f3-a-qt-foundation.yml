@@ -1,0 +1,177 @@
+name: F3.A Qt foundation
+
+on:
+  push:
+    branches:
+      - feat/f3-a-qt-foundation
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    env:
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify branch ancestry and clean checkout
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git merge-base HEAD 68488e6c339b8cd60011d51380cb8250c488fb35)" = "68488e6c339b8cd60011d51380cb8250c488fb35"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+
+      - name: Install Ubuntu GUI runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y             xvfb python3-tk libegl1 libgl1 libopengl0 libfontconfig1             libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0             libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install development environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c constraints-python312.txt -e '.[dev]'
+
+      - name: F3.A focused tests
+        run: python -m unittest tests.test_qt_foundation -v
+
+      - name: Full regression under Xvfb
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: xvfb-run -a python -m unittest discover -s tests -v
+
+      - name: Ruff
+        run: |
+          python -m ruff check src tests tools
+          python -m ruff format --check src tests tools
+
+      - name: Build wheel and sdist
+        run: |
+          python -m build
+          sha256sum dist/* | tee dist/SHA256SUMS
+
+      - name: Clean external install
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m venv /tmp/varia-f3a-clean
+          /tmp/varia-f3a-clean/bin/python -m pip install --upgrade pip
+          /tmp/varia-f3a-clean/bin/pip install             -c "$GITHUB_WORKSPACE/constraints-python312.txt" dist/*.whl
+          /tmp/varia-f3a-clean/bin/pip check
+
+      - name: External entry points without source tree
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/varia-f3a-runtime
+          cd /tmp/varia-f3a-runtime
+          env -u PYTHONPATH /tmp/varia-f3a-clean/bin/varia-studio-qt --help
+          env -u PYTHONPATH /tmp/varia-f3a-clean/bin/python -m csv_analyzer.qt_app --help
+          env -u PYTHONPATH /tmp/varia-f3a-clean/bin/varia-studio --help
+          env -u PYTHONPATH /tmp/varia-f3a-clean/bin/csv-analyzer --help
+
+      - name: External Qt shell and dataset smoke
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd /tmp/varia-f3a-runtime
+          cat > smoke.csv <<'EOF'
+          x,y
+          1,2
+          3,4
+          EOF
+          env -u PYTHONPATH QT_QPA_PLATFORM=offscreen             /tmp/varia-f3a-clean/bin/python - <<'PY' | tee "$GITHUB_WORKSPACE/dist/qt-smoke.txt"
+          from pathlib import Path
+          from PySide6.QtCore import QEventLoop, QTimer
+          from csv_analyzer.qt_app.bootstrap import create_application
+          from csv_analyzer.qt_app.coordinator import Lifecycle
+
+          app, coordinator, shell = create_application()
+          coordinator.start()
+          shell.show()
+          coordinator.load_path(Path("smoke.csv"))
+
+          loop = QEventLoop()
+          poll = QTimer()
+          poll.setInterval(2)
+          def check_loaded():
+              if coordinator.state.dataset is not None:
+                  loop.quit()
+          poll.timeout.connect(check_loaded)
+          poll.start()
+          QTimer.singleShot(5000, loop.quit)
+          loop.exec()
+          assert coordinator.state.dataset is not None
+          assert coordinator.state.dataset.frame.shape == (2, 2)
+          assert coordinator.state.dataset_revision == 1
+          assert coordinator.state.selection_revision == 1
+
+          coordinator.begin_close()
+          if coordinator.lifecycle is not Lifecycle.CLOSED:
+              close_loop = QEventLoop()
+              close_poll = QTimer()
+              close_poll.setInterval(2)
+              close_poll.timeout.connect(
+                  lambda: close_loop.quit()
+                  if coordinator.lifecycle is Lifecycle.CLOSED
+                  else None
+              )
+              close_poll.start()
+              QTimer.singleShot(5000, close_loop.quit)
+              close_loop.exec()
+          assert coordinator.lifecycle is Lifecycle.CLOSED
+          print("qt_shell=PASS")
+          print("dataset_shape=2x2")
+          print("cwd=" + str(Path.cwd()))
+          PY
+
+      - name: External CTk startup smoke
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: |
+          set -euxo pipefail
+          cd /tmp/varia-f3a-runtime
+          env -u PYTHONPATH xvfb-run -a /tmp/varia-f3a-clean/bin/python - <<'PY'             | tee "$GITHUB_WORKSPACE/dist/ctk-smoke.txt"
+          from pathlib import Path
+          import csv_analyzer
+          from csv_analyzer.app import Application
+
+          app = Application()
+          app.update_idletasks()
+          print("ctk_shell=PASS")
+          print("package_origin=" + str(Path(csv_analyzer.__file__).resolve()))
+          app.close()
+          PY
+
+      - name: Record environment
+        shell: bash
+        run: |
+          {
+            echo "commit=$(git rev-parse HEAD)"
+            echo "tree=$(git rev-parse HEAD^{tree})"
+            echo "baseline=68488e6c339b8cd60011d51380cb8250c488fb35"
+            echo "python=$(python --version 2>&1)"
+            echo "pyside6=$(python -c 'import PySide6; print(PySide6.__version__)')"
+            echo "matplotlib=$(python -c 'import matplotlib; print(matplotlib.__version__)')"
+          } | tee dist/environment.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f3-a-qt-foundation-evidence
+          path: |
+            dist/*
+          if-no-files-found: error

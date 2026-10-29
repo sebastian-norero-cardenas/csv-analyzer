@@ -1,0 +1,53 @@
+# F3.A — Qt Foundation
+
+F3.A introduces an independent PySide6 bootstrap without replacing the existing
+CustomTkinter application. The canonical `varia-studio` and compatibility
+`csv-analyzer` commands still start CTk; `varia-studio-qt` and
+`python -m csv_analyzer.qt_app` start the minimal Qt foundation.
+
+## Ownership
+
+- `AppState` remains the single committed dataset store.
+- `QtCoordinator` owns publication policy and lifecycle.
+- `QtTaskRunner` owns one private `QThreadPool` with two worker threads.
+- The runner queue is application-managed and bounded to eight pending requests.
+- Workers receive only a callable, cancellation Event and immutable revision
+  metadata. They never receive live `AppState`, widgets or view callbacks.
+- The Qt shell is intentionally minimal; table, charts and statistics remain
+  outside F3.A.
+
+A load is exclusive with other physical loads. Replacing a logical LOAD sets the
+old cancellation Event immediately but waits for that physical worker to finish
+before starting another LOAD. Other work may use the second worker.
+
+Closing follows STARTING -> RUNNING -> CLOSING -> CLOSED. CLOSING invalidates
+publication, stops accepting work and requests cancellation, while keeping the
+pool, bridge and runnable objects alive until physical activity reaches zero. No
+indefinite wait is performed on the GUI thread.
+
+## Revision domains
+
+`AppState.revision` is preserved for CTk compatibility.
+
+- Dataset commit: revision +1, dataset_revision +1, selection_revision +1.
+- Filter commit: revision +1, selection_revision +1.
+- Failed, cancelled or stale load: no revision changes.
+
+Toolkit-neutral `StateSnapshot` instances carry stable committed references and
+revision tokens. Qt publication checks application epoch, key/generation,
+dataset revision, selection revision, load ticket and lifecycle before invoking
+a GUI-thread callback.
+
+## PySide6 policy
+
+Project metadata uses `PySide6>=6.11.3,<6.13`. This intentionally avoids making
+the experimental spike's exact 6.12.0 pin the production dependency policy while
+keeping F3.A inside the current Qt 6.11/6.12 compatibility band.
+
+The CPython 3.12 reproducibility snapshot constrains PySide6 to 6.12.0 and pins
+its split wheel dependencies. PySide6 6.12 supports Python 3.10+ and publishes an
+x86-64 manylinux_2_34 wheel, which is compatible with Ubuntu 22.04's newer glibc.
+Matplotlib's QtAgg backend supports PySide6, although QtAgg integration itself is
+not part of F3.A.
+
+This is transitional packaging, not the final release packaging decision.
