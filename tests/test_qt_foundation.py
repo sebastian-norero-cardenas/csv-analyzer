@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import builtins
 import gc
 import os
 import subprocess

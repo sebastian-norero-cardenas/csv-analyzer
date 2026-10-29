@@ -48,10 +48,19 @@ jobs:
       - name: F3.A focused tests
         run: python -m unittest tests.test_qt_foundation -v
 
-      - name: Full regression under Xvfb
+      - name: Baseline regression under Xvfb in a Tk-only process
         env:
           QT_QPA_PLATFORM: xcb
-        run: xvfb-run -a python -m unittest discover -s tests -v
+        run: |
+          xvfb-run -a python -m unittest -v \
+            tests.test_analysis_plots \
+            tests.test_application \
+            tests.test_data_state \
+            tests.test_export_callbacks \
+            tests.test_exports \
+            tests.test_gui \
+            tests.test_identity \
+            tests.test_jobs
 
       - name: Ruff
         run: |
