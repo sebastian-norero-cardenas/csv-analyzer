@@ -528,6 +528,46 @@ builtins.__import__ = guarded
             "csv_analyzer.plots, csv_analyzer.exports",
         )
 
+    def test_metadata_keeps_pyside6_in_qt_extra_only(self):
+        import tomllib
+
+        metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        base_dependencies = metadata["project"]["dependencies"]
+        extras = metadata["project"]["optional-dependencies"]
+
+        self.assertFalse(any(item.lower().startswith("pyside6") for item in base_dependencies))
+        self.assertTrue(any(item.startswith("PySide6>=6.11.3,<6.13") for item in extras["qt"]))
+
+    def test_qt_package_and_bootstrap_import_without_pyside6(self):
+        self.run_guarded_import(
+            ["PySide6", "shiboken6"],
+            "import csv_analyzer.qt_app, csv_analyzer.qt_app.bootstrap",
+        )
+
+    def test_missing_qt_runtime_fails_cleanly(self):
+        code = """
+import builtins
+real_import = builtins.__import__
+def guarded(name, *args, **kwargs):
+    if name == 'PySide6' or name.startswith('PySide6.') or name == 'shiboken6':
+        raise ModuleNotFoundError("No module named 'PySide6'", name='PySide6')
+    return real_import(name, *args, **kwargs)
+builtins.__import__ = guarded
+from csv_analyzer.qt_app import main
+raise SystemExit(main([]))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            env={**os.environ, "QT_QPA_PLATFORM": "offscreen"},
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Install Varia Studio with the 'qt' extra.", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_qt_does_not_import_tk_and_ctk_does_not_import_qt(self):
         self.run_guarded_import(
             ["tkinter", "customtkinter"],

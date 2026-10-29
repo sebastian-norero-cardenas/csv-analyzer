@@ -1,4 +1,4 @@
-"""Bootstrap and CLI for the independent Qt entry point."""
+"""Bootstrap and CLI for the independent optional Qt entry point."""
 
 from __future__ import annotations
 
@@ -6,11 +6,16 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
-from PySide6.QtWidgets import QApplication
+QT_EXTRA_MESSAGE = (
+    "PySide6 is required for the Qt interface. "
+    "Install Varia Studio with the 'qt' extra."
+)
 
-from .coordinator import QtCoordinator
-from .shell import QtShell
+
+class QtDependencyError(RuntimeError):
+    """The optional Qt runtime is not installed."""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,7 +27,22 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def create_application() -> tuple[QApplication, QtCoordinator, QtShell]:
+def _load_qt_components() -> tuple[type[Any], type[Any], type[Any]]:
+    try:
+        from PySide6.QtWidgets import QApplication
+
+        from .coordinator import QtCoordinator
+        from .shell import QtShell
+    except ModuleNotFoundError as error:
+        missing = error.name or ""
+        if missing == "PySide6" or missing.startswith("PySide6.") or missing == "shiboken6":
+            raise QtDependencyError(QT_EXTRA_MESSAGE) from None
+        raise
+    return QApplication, QtCoordinator, QtShell
+
+
+def create_application() -> tuple[Any, Any, Any]:
+    QApplication, QtCoordinator, QtShell = _load_qt_components()
     app = QApplication.instance() or QApplication(sys.argv[:1])
     shell = QtShell()
     coordinator = QtCoordinator(shell)
@@ -35,7 +55,12 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.debug else logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    app, coordinator, shell = create_application()
+    try:
+        app, coordinator, shell = create_application()
+    except QtDependencyError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
     shell.show()
     coordinator.start()
     if args.file:

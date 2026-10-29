@@ -38,16 +38,48 @@ revision tokens. Qt publication checks application epoch, key/generation,
 dataset revision, selection revision, load ticket and lifecycle before invoking
 a GUI-thread callback.
 
-## PySide6 policy
+## Optional PySide6 policy
 
-Project metadata uses `PySide6>=6.11.3,<6.13`. This intentionally avoids making
-the experimental spike's exact 6.12.0 pin the production dependency policy while
+PySide6 is a transitional **optional dependency** while CTk and Qt coexist.
+
+A base installation:
+
+```bash
+python -m pip install .
+```
+
+installs CTk/core dependencies but does not require PySide6.
+
+The Qt route is enabled explicitly:
+
+```bash
+python -m pip install '.[qt]'
+```
+
+Development of the Qt route uses both extras:
+
+```bash
+python -m pip install '.[dev,qt]'
+```
+
+The `qt` extra declares `PySide6>=6.11.3,<6.13`. This avoids making the
+experimental spike's exact 6.12.0 pin the project dependency policy while
 keeping F3.A inside the current Qt 6.11/6.12 compatibility band.
 
-The CPython 3.12 reproducibility snapshot constrains PySide6 to 6.12.0 and pins
-its split wheel dependencies. PySide6 6.12 supports Python 3.10+ and publishes an
-x86-64 manylinux_2_34 wheel, which is compatible with Ubuntu 22.04's newer glibc.
-Matplotlib's QtAgg backend supports PySide6, although QtAgg integration itself is
-not part of F3.A.
+The CPython 3.12 constraints file pins PySide6 6.12.0 and its split wheels only
+for reproducible environments that actually install the `qt` extra. Those
+constraint entries do not turn PySide6 into a base dependency.
+
+Importing `csv_analyzer`, core modules, `csv_analyzer.qt_app`, or the Qt
+bootstrap does not import PySide6 eagerly. Without the `qt` extra:
+
+- `varia-studio-qt --help` and `python -m csv_analyzer.qt_app --help` work,
+  because argument parsing does not require Qt;
+- attempting to start the Qt UI exits non-zero with an actionable stderr
+  message telling the user to install the `qt` extra, without a normal raw
+  traceback.
+
+Matplotlib's QtAgg backend is compatible with PySide6, although QtAgg
+integration itself is not part of F3.A.
 
 This is transitional packaging, not the final release packaging decision.

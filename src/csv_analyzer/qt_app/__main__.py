@@ -1,5 +1,5 @@
-"""Module entry point for the Qt foundation."""
+"""Module entry point for the optional Qt foundation."""
 
-from .bootstrap import main
+from . import main
 
 raise SystemExit(main())
