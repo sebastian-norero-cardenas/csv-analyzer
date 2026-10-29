@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 
 from ..data import CancelledError
 
@@ -160,7 +160,7 @@ class QtTaskRunner(QObject):
     def activity(self) -> RunnerActivity:
         return RunnerActivity(
             logical=len(self._logical),
-            physical=len(self._active),
+            physical=max(len(self._active), self.pool.activeThreadCount()),
             queued=len(self._queued),
         )
 
@@ -241,11 +241,11 @@ class QtTaskRunner(QObject):
         self._queued.clear()
         self._emit_activity()
         if not self._active:
-            self.physical_idle.emit()
+            self._check_physical_idle()
 
     def finalize(self) -> None:
         """Release pool resources after physical activity has reached zero."""
-        if self._active:
+        if self.activity.physical:
             raise RuntimeError("Cannot finalize while physical tasks are active.")
         self._accepting = False
         self._closing = True
@@ -291,8 +291,19 @@ class QtTaskRunner(QObject):
             self._logical.pop(token.key, None)
         self._schedule()
         self._emit_activity()
-        if self._closing and not self._active:
-            self.physical_idle.emit()
+        if not self._active:
+            self._check_physical_idle()
+
+    def _check_physical_idle(self) -> None:
+        """Wait cooperatively for the QThreadPool to observe runnable return."""
+        if self._active:
+            return
+        if self.pool.activeThreadCount() == 0:
+            self._emit_activity()
+            if self._closing:
+                self.physical_idle.emit()
+            return
+        QTimer.singleShot(0, self._check_physical_idle)
 
     def _emit_activity(self) -> None:
         self.activity_changed.emit(self.activity)
