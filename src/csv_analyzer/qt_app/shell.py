@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import QMetaObject, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -99,9 +99,11 @@ class QtShell(QMainWindow):
         if self._allow_close:
             return
         self._allow_close = True
-        # close_requested is emitted synchronously from closeEvent(). Defer the
-        # definitive close until that ignored event has fully unwound.
-        QTimer.singleShot(0, self.close)
+        # close_requested is emitted synchronously from closeEvent(). Queue the
+        # definitive QWidget.close() until that ignored event has fully unwound.
+        # Using the QObject as receiver avoids retaining a Python callback after
+        # the shell itself has been destroyed.
+        QMetaObject.invokeMethod(self, "close", Qt.ConnectionType.QueuedConnection)
 
     def closeEvent(self, event) -> None:
         if self._allow_close:

@@ -90,8 +90,9 @@ The final close request is deliberately deferred by one Qt event-loop turn.
 `closeEvent()` first ignores the user's close request and emits
 `close_requested`; once the coordinator reaches `CLOSED`, `allow_close()`
 sets the acceptance flag and schedules the definitive `close()` with
-`QTimer.singleShot(0, ...)`. This avoids re-entering `closeEvent()` from the
-same synchronous signal chain.
+`QMetaObject.invokeMethod(..., Qt.QueuedConnection)`. This avoids re-entering
+`closeEvent()` from the same synchronous signal chain and ties the queued call
+to the shell QObject rather than to a standalone Python timer callback.
 
 Task logging uses compact Python logging messages rather than a telemetry
 framework. DEBUG events include task identity (key, generation, application
