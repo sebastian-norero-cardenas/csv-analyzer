@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -50,6 +51,7 @@ class TaskOutcome:
     value: Any = None
     error: BaseException | None = None
     worker_thread_id: int | None = None
+    elapsed_ms: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -70,6 +72,15 @@ class _Request:
     cancel: threading.Event
 
 
+def _token_fields(token: TaskToken) -> str:
+    return (
+        f"key={token.key} generation={token.generation} "
+        f"application_epoch={token.application_epoch} "
+        f"dataset_revision={token.dataset_revision} "
+        f"selection_revision={token.selection_revision}"
+    )
+
+
 class _Bridge(QObject):
     outcome = Signal(object)
 
@@ -87,6 +98,7 @@ class _Runnable(QRunnable):
         value = None
         error: BaseException | None = None
         worker_thread_id = threading.get_ident()
+        started_ns = time.perf_counter_ns()
         try:
             if self.request.cancel.is_set():
                 raise CancelledError()
@@ -99,6 +111,24 @@ class _Runnable(QRunnable):
         except Exception as exc:
             status = TaskStatus.ERROR
             error = exc
+
+        elapsed_ms = (time.perf_counter_ns() - started_ns) / 1_000_000
+        exception_class = type(error).__name__ if error is not None else "None"
+        if status is TaskStatus.ERROR and error is not None:
+            logger.error(
+                "event=task_worker_error %s exception_class=%s elapsed_ms=%.3f",
+                _token_fields(self.request.token),
+                exception_class,
+                elapsed_ms,
+                exc_info=(type(error), error, error.__traceback__),
+            )
+        logger.debug(
+            "event=task_physical_finished %s status=%s elapsed_ms=%.3f exception_class=%s",
+            _token_fields(self.request.token),
+            status.name,
+            elapsed_ms,
+            exception_class,
+        )
         self.bridge.outcome.emit(
             TaskOutcome(
                 token=self.request.token,
@@ -106,6 +136,7 @@ class _Runnable(QRunnable):
                 value=value,
                 error=error,
                 worker_thread_id=worker_thread_id,
+                elapsed_ms=elapsed_ms,
             )
         )
 
@@ -182,6 +213,16 @@ class QtTaskRunner(QObject):
         exclusive_group: str | None = None,
     ) -> TaskToken:
         if not self._accepting:
+            generation = self._generation.get(key, 0) + 1
+            logger.debug(
+                "event=task_rejected reason=runner_closed key=%s generation=%d "
+                "application_epoch=%d dataset_revision=%d selection_revision=%d",
+                key,
+                generation,
+                application_epoch,
+                dataset_revision,
+                selection_revision,
+            )
             raise TaskRunnerClosed("Task runner is closing.")
 
         # Replacement invalidates publication immediately. A physically running
@@ -202,12 +243,26 @@ class QtTaskRunner(QObject):
         self._logical[key] = generation
 
         if self._can_start(request):
+            logger.debug(
+                "event=task_admitted admission=started %s",
+                _token_fields(token),
+            )
             self._start(request)
         else:
             if len(self._queued) >= self.max_pending:
                 self._logical.pop(key, None)
+                logger.debug(
+                    "event=task_rejected reason=queue_full %s pending=%d",
+                    _token_fields(token),
+                    len(self._queued),
+                )
                 raise TaskQueueFull(f"Task queue is full ({self.max_pending} pending requests).")
             self._queued[key] = request
+            logger.debug(
+                "event=task_admitted admission=queued %s pending=%d",
+                _token_fields(token),
+                len(self._queued),
+            )
 
         self._emit_activity()
         self._schedule()
@@ -216,13 +271,21 @@ class QtTaskRunner(QObject):
     def cancel(self, key: str) -> None:
         generation = self._logical.pop(key, None)
         queued = self._queued.pop(key, None)
+        active = self._active.get((key, generation)) if generation is not None else None
+
+        request = active or queued
+        if request is not None:
+            logger.debug(
+                "event=task_cancel_requested %s physical_active=%s queued=%s",
+                _token_fields(request.token),
+                active is not None,
+                queued is not None,
+            )
+
         if queued is not None:
             queued.cancel.set()
-
-        if generation is not None:
-            active = self._active.get((key, generation))
-            if active is not None:
-                active.cancel.set()
+        if active is not None:
+            active.cancel.set()
 
         self._emit_activity()
 
@@ -264,6 +327,12 @@ class QtTaskRunner(QObject):
     def _start(self, request: _Request) -> None:
         key = (request.token.key, request.token.generation)
         self._active[key] = request
+        logger.debug(
+            "event=task_started %s physical=%d queued=%d",
+            _token_fields(request.token),
+            len(self._active),
+            len(self._queued),
+        )
         self.pool.start(_Runnable(request, self._bridge))
 
     def _schedule(self) -> None:
@@ -283,6 +352,14 @@ class QtTaskRunner(QObject):
     @Slot(object)
     def _on_worker_outcome(self, outcome: TaskOutcome) -> None:
         token = outcome.token
+        exception_class = type(outcome.error).__name__ if outcome.error is not None else "None"
+        logger.debug(
+            "event=task_outcome_received %s status=%s elapsed_ms=%.3f exception_class=%s",
+            _token_fields(token),
+            outcome.status.name,
+            outcome.elapsed_ms,
+            exception_class,
+        )
         self._active.pop((token.key, token.generation), None)
         # Keep the generation current while the GUI-thread coordinator validates
         # and publishes this outcome. A callback may submit a replacement.
@@ -299,6 +376,11 @@ class QtTaskRunner(QObject):
         if self._active:
             return
         if self.pool.activeThreadCount() == 0:
+            logger.debug(
+                "event=task_pool_physical_idle logical=%d physical=0 queued=%d",
+                len(self._logical),
+                len(self._queued),
+            )
             self._emit_activity()
             if self._closing:
                 self.physical_idle.emit()

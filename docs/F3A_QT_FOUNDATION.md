@@ -83,3 +83,22 @@ Matplotlib's QtAgg backend is compatible with PySide6, although QtAgg
 integration itself is not part of F3.A.
 
 This is transitional packaging, not the final release packaging decision.
+
+## R2 close, error-boundary and observability notes
+
+The final close request is deliberately deferred by one Qt event-loop turn.
+`closeEvent()` first ignores the user's close request and emits
+`close_requested`; once the coordinator reaches `CLOSED`, `allow_close()`
+sets the acceptance flag and schedules the definitive `close()` with
+`QTimer.singleShot(0, ...)`. This avoids re-entering `closeEvent()` from the
+same synchronous signal chain.
+
+Task logging uses compact Python logging messages rather than a telemetry
+framework. DEBUG events include task identity (key, generation, application
+epoch, dataset revision and selection revision), admission, cancellation,
+physical completion, outcome receipt/publication/discard and elapsed time.
+Worker and callback failures retain technical tracebacks at ERROR level.
+
+The development extra uses `tomli` only on Python <3.11 so metadata tests remain
+compatible with the declared Python 3.10 floor without adding a runtime
+dependency.

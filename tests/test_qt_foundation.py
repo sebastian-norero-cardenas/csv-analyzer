@@ -66,6 +66,16 @@ class RecordingShell(QtShell):
         self.errors.append(text)
 
 
+class ExplodingPresenterShell(RecordingShell):
+    def __init__(self):
+        super().__init__()
+        self.presenter_calls = 0
+
+    def show_error(self, text):
+        self.presenter_calls += 1
+        raise RuntimeError("qa-presenter-boom")
+
+
 class StateContractTests(unittest.TestCase):
     def test_revision_domains_and_snapshot(self):
         state = AppState()
@@ -154,6 +164,32 @@ class RunnerContractTests(unittest.TestCase):
         self.assertEqual(outcomes[1].status, TaskStatus.ERROR)
         self.assertIsInstance(outcomes[1].error, ValueError)
 
+    def test_task_observability_records_identity_admission_and_elapsed(self):
+        runner = self.make_runner()
+        outcomes = []
+        runner.outcome_ready.connect(outcomes.append)
+
+        with self.assertLogs("csv_analyzer.qt_app.tasks", level="DEBUG") as captured:
+            runner.submit(
+                "observed",
+                lambda cancel: "value",
+                application_epoch=7,
+                dataset_revision=11,
+                selection_revision=13,
+            )
+            pump_until(lambda: len(outcomes) == 1)
+
+        log_text = "\n".join(captured.output)
+        identity = (
+            "key=observed generation=1 application_epoch=7 "
+            "dataset_revision=11 selection_revision=13"
+        )
+        self.assertIn("event=task_admitted admission=started " + identity, log_text)
+        self.assertIn("event=task_started " + identity, log_text)
+        self.assertIn("event=task_physical_finished " + identity, log_text)
+        self.assertIn("event=task_outcome_received " + identity, log_text)
+        self.assertIn("elapsed_ms=", log_text)
+
     def test_cancel_is_logical_before_physical_completion(self):
         runner = self.make_runner(max_workers=1)
         entered = threading.Event()
@@ -174,7 +210,10 @@ class RunnerContractTests(unittest.TestCase):
             selection_revision=0,
         )
         self.assertTrue(entered.wait(timeout=2))
-        runner.cancel("slow")
+        with self.assertLogs("csv_analyzer.qt_app.tasks", level="DEBUG") as captured:
+            runner.cancel("slow")
+        self.assertIn("event=task_cancel_requested", "\n".join(captured.output))
+        self.assertIn("physical_active=True", "\n".join(captured.output))
         self.assertEqual(runner.activity.logical, 0)
         self.assertEqual(runner.activity.physical, 1)
         release.set()
@@ -209,14 +248,18 @@ class RunnerContractTests(unittest.TestCase):
                 selection_revision=0,
             )
         self.assertEqual(runner.activity.queued, 8)
-        with self.assertRaises(TaskQueueFull):
-            runner.submit(
-                "overflow",
-                lambda cancel: None,
-                application_epoch=0,
-                dataset_revision=0,
-                selection_revision=0,
-            )
+        with self.assertLogs("csv_analyzer.qt_app.tasks", level="DEBUG") as captured:
+            with self.assertRaises(TaskQueueFull):
+                runner.submit(
+                    "overflow",
+                    lambda cancel: None,
+                    application_epoch=0,
+                    dataset_revision=0,
+                    selection_revision=0,
+                )
+        rejection_log = "\n".join(captured.output)
+        self.assertIn("event=task_rejected reason=queue_full", rejection_log)
+        self.assertIn("key=overflow", rejection_log)
 
         old_generation = runner.current_generation("q0")
         replacement = runner.submit(
@@ -310,6 +353,42 @@ class CoordinatorContractTests(unittest.TestCase):
         coordinator.submit_task("after", lambda cancel: 2, success=seen.append)
         pump_until(lambda: seen == [2])
 
+    def test_presenter_failure_is_logged_and_does_not_break_loop(self):
+        shell = ExplodingPresenterShell()
+        coordinator = QtCoordinator(shell)
+        coordinator.start()
+        shell.show()
+        self.addCleanup(self.cleanup_coordinator, coordinator, shell)
+
+        def fail(cancel):
+            raise ValueError("qa-worker-boom")
+
+        with self.assertLogs("csv_analyzer.qt_app", level="ERROR") as captured:
+            coordinator.submit_task("presenter-failure", fail)
+            pump_until(lambda: shell.presenter_calls == 1)
+
+        messages = "\n".join(record.getMessage() for record in captured.records)
+        self.assertIn("event=task_worker_error", messages)
+        self.assertIn("exception_class=ValueError", messages)
+        self.assertIn("event=error_presenter_failed", messages)
+        self.assertIn("presenter_exception_class=RuntimeError", messages)
+        self.assertTrue(
+            any(
+                record.exc_info is not None and "error_presenter_failed" in record.getMessage()
+                for record in captured.records
+            )
+        )
+        self.assertEqual(shell.presenter_calls, 1)
+
+        seen = []
+        coordinator.submit_task("after-presenter", lambda cancel: 2, success=seen.append)
+        pump_until(lambda: seen == [2])
+
+        shell.close()
+        pump_until(
+            lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible()
+        )
+
     def test_cancel_and_late_result_never_publish(self):
         coordinator, shell = self.make(max_workers=1)
         entered = threading.Event()
@@ -345,9 +424,13 @@ class CoordinatorContractTests(unittest.TestCase):
         self.assertTrue(entered.wait(timeout=2))
         coordinator.submit_task("same", lambda cancel: "new", success=seen.append)
         pump_until(lambda: "new" in seen)
-        release.set()
-        pump_until(lambda: coordinator.runner.activity.physical == 0)
+        with self.assertLogs("csv_analyzer.qt_app.coordinator", level="DEBUG") as captured:
+            release.set()
+            pump_until(lambda: coordinator.runner.activity.physical == 0)
         self.assertEqual(seen, ["new"])
+        stale_log = "\n".join(captured.output)
+        self.assertIn("event=task_outcome_discarded", stale_log)
+        self.assertIn("key=same", stale_log)
 
     def test_dataset_change_invalidates_task_publication(self):
         coordinator, shell = self.make()
@@ -498,6 +581,41 @@ class CoordinatorContractTests(unittest.TestCase):
         self.assertEqual(published, [])
 
 
+class ShellCloseProbeTests(unittest.TestCase):
+    def run_probe(self, action, worker):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "tools" / "f3a_qt_close_probe.py"),
+                "--action",
+                action,
+                "--worker",
+                worker,
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+            env={**os.environ, "QT_QPA_PLATFORM": "offscreen"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("lifecycle=CLOSED", result.stdout)
+        self.assertIn("window_closed=true", result.stdout)
+        self.assertIn("late_publications=0", result.stdout)
+        self.assertIn("event_loop_exit_code=0", result.stdout)
+
+    def test_quit_button_exits_real_event_loop(self):
+        for worker in ("none", "cooperative", "noncancelable"):
+            with self.subTest(worker=worker):
+                self.run_probe("quit", worker)
+
+    def test_window_close_exits_real_event_loop(self):
+        for worker in ("none", "cooperative", "noncancelable"):
+            with self.subTest(worker=worker):
+                self.run_probe("window", worker)
+
+
 class SeparationGateTests(unittest.TestCase):
     def run_guarded_import(self, forbidden, statement):
         code = f"""
@@ -529,7 +647,10 @@ builtins.__import__ = guarded
         )
 
     def test_metadata_keeps_pyside6_in_qt_extra_only(self):
-        import tomllib
+        try:
+            import tomllib
+        except ModuleNotFoundError:
+            import tomli as tomllib
 
         metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         base_dependencies = metadata["project"]["dependencies"]

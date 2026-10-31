@@ -230,44 +230,76 @@ class QtCoordinator(QObject):
         if self.lifecycle is Lifecycle.CLOSING and self.runner.activity.physical == 0:
             self._finalize_close()
 
-    def _accept(self, publication: _Publication, outcome: TaskOutcome) -> bool:
+    def _publication_rejection_reason(
+        self, publication: _Publication, outcome: TaskOutcome
+    ) -> str | None:
         token = outcome.token
         if self.lifecycle is not Lifecycle.RUNNING:
-            return False
+            return "lifecycle"
         if publication.token != token:
-            return False
+            return "publication_replaced"
         if token.application_epoch != self.application_epoch:
-            return False
+            return "application_epoch"
         if not self.runner.is_current(token):
-            return False
+            return "generation"
         snapshot = self.state.snapshot()
         if token.dataset_revision != snapshot.dataset_revision:
-            return False
+            return "dataset_revision"
         if token.selection_revision != snapshot.selection_revision:
-            return False
+            return "selection_revision"
         if token.load_ticket is not None and token.load_ticket != self.state.load_ticket:
-            return False
+            return "load_ticket"
         if publication.receiver is not None:
             receiver = publication.receiver()
             if receiver is None or not shiboken6.isValid(receiver):
-                return False
-        return True
+                return "receiver_destroyed"
+        return None
 
     @Slot(object)
     def _on_outcome(self, outcome: TaskOutcome) -> None:
         if threading.get_ident() != self.gui_thread_id:
             raise RuntimeError("Task publication left the Qt GUI thread.")
 
-        publication = self._publications.get(outcome.token.key)
+        token = outcome.token
+        publication = self._publications.get(token.key)
         if publication is None:
+            logger.debug(
+                "event=task_outcome_discarded reason=no_publication key=%s generation=%d "
+                "application_epoch=%d dataset_revision=%d selection_revision=%d",
+                token.key,
+                token.generation,
+                token.application_epoch,
+                token.dataset_revision,
+                token.selection_revision,
+            )
             return
-        accepted = self._accept(publication, outcome)
-        if publication.token == outcome.token:
-            self._publications.pop(outcome.token.key, None)
-        if not accepted:
+
+        rejection_reason = self._publication_rejection_reason(publication, outcome)
+        if publication.token == token:
+            self._publications.pop(token.key, None)
+        if rejection_reason is not None:
+            logger.debug(
+                "event=task_outcome_discarded reason=%s key=%s generation=%d "
+                "application_epoch=%d dataset_revision=%d selection_revision=%d",
+                rejection_reason,
+                token.key,
+                token.generation,
+                token.application_epoch,
+                token.dataset_revision,
+                token.selection_revision,
+            )
             return
 
         if outcome.status is TaskStatus.CANCELLED:
+            logger.debug(
+                "event=task_outcome_discarded reason=cancelled key=%s generation=%d "
+                "application_epoch=%d dataset_revision=%d selection_revision=%d",
+                token.key,
+                token.generation,
+                token.application_epoch,
+                token.dataset_revision,
+                token.selection_revision,
+            )
             return
         stored_callback = (
             publication.failure if outcome.status is TaskStatus.ERROR else publication.success
@@ -282,8 +314,23 @@ class QtCoordinator(QObject):
                 callback(outcome.error or RuntimeError("Worker failed without an error."))
             else:
                 callback(outcome.value)
+            logger.debug(
+                "event=task_outcome_published key=%s generation=%d application_epoch=%d "
+                "dataset_revision=%d selection_revision=%d status=%s",
+                token.key,
+                token.generation,
+                token.application_epoch,
+                token.dataset_revision,
+                token.selection_revision,
+                outcome.status.name,
+            )
         except Exception as error:
-            logger.exception("Qt publication callback failed")
+            logger.exception(
+                "event=task_callback_error key=%s generation=%d exception_class=%s",
+                token.key,
+                token.generation,
+                type(error).__name__,
+            )
             self._present_error(error)
 
     @Slot(object)
@@ -312,11 +359,35 @@ class QtCoordinator(QObject):
     def _present_error(self, error: BaseException) -> None:
         if isinstance(error, CancelledError):
             return
-        text = user_error_text(error)
+        try:
+            text = user_error_text(error)
+        except Exception as presenter_error:
+            logger.exception(
+                "event=error_presenter_failed stage=format original_exception_class=%s "
+                "presenter_exception_class=%s",
+                type(error).__name__,
+                type(presenter_error).__name__,
+            )
+            return
+
         shell = self._shell()
-        if shell is not None:
-            shell.set_status(text)
-            shell.show_error(text)
+        if shell is None:
+            return
+
+        for stage, presenter in (
+            ("set_status", shell.set_status),
+            ("show_error", shell.show_error),
+        ):
+            try:
+                presenter(text)
+            except Exception as presenter_error:
+                logger.exception(
+                    "event=error_presenter_failed stage=%s original_exception_class=%s "
+                    "presenter_exception_class=%s",
+                    stage,
+                    type(error).__name__,
+                    type(presenter_error).__name__,
+                )
 
     def _finalize_close(self) -> None:
         if self.lifecycle is Lifecycle.CLOSED:

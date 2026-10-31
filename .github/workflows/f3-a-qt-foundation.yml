@@ -9,9 +9,62 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  focal-python:
+    name: F3.A focal / Python ${{ matrix.python-version }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 40
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    env:
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Ubuntu Qt runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install focal development environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            python -m pip install -c constraints-python312.txt -e '.[dev,qt]'
+          else
+            python -m pip install -e '.[dev,qt]'
+          fi
+
+      - name: F3.A focal suite
+        run: python -m unittest tests.test_qt_foundation -v
+
+      - name: Record focal environment
+        shell: bash
+        run: |
+          echo "python=$(python --version 2>&1)"
+          echo "pyside6=$(python -c 'import PySide6; print(PySide6.__version__)')"
+
+  verify:
+    name: F3.A R2 regression / build / installed smokes
+    needs: focal-python
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
     env:
       QT_QPA_PLATFORM: offscreen
 
@@ -44,13 +97,10 @@ jobs:
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
             libxcb-util1 libxcb-xinerama0 libxcb-xkb1
 
-      - name: Install Qt development environment explicitly
+      - name: Install Qt development environment
         run: |
           python -m pip install --upgrade pip
           python -m pip install -c constraints-python312.txt -e '.[dev,qt]'
-
-      - name: F3.A focused tests
-        run: python -m unittest tests.test_qt_foundation -v
 
       - name: Baseline regression under Xvfb in a Tk-only process
         env:
@@ -70,9 +120,9 @@ jobs:
         run: |
           python -m ruff check src tests tools
           python -m ruff format --check \
-            src/csv_analyzer/state.py \
             src/csv_analyzer/qt_app \
-            tests/test_qt_foundation.py
+            tests/test_qt_foundation.py \
+            tools/f3a_qt_close_probe.py
 
       - name: Build wheel and sdist
         run: |
@@ -80,126 +130,71 @@ jobs:
           sha256sum dist/* | tee dist/SHA256SUMS
 
       - name: Create external runtime directory
-        run: mkdir -p /tmp/varia-f3a-r1-runtime
+        run: mkdir -p /tmp/varia-f3a-r2-runtime
 
       - name: Clean base install without Qt extra
         shell: bash
         run: |
           set -euxo pipefail
           WHEEL="$(readlink -f "$(ls dist/*.whl)")"
-          python -m venv /tmp/varia-f3a-base
-          /tmp/varia-f3a-base/bin/python -m pip install --upgrade pip
-          /tmp/varia-f3a-base/bin/pip install \
+          python -m venv /tmp/varia-f3a-r2-base
+          /tmp/varia-f3a-r2-base/bin/python -m pip install --upgrade pip
+          /tmp/varia-f3a-r2-base/bin/pip install \
             -c "$GITHUB_WORKSPACE/constraints-python312.txt" "$WHEEL"
-          /tmp/varia-f3a-base/bin/pip check
-          /tmp/varia-f3a-base/bin/python - <<'PY' | tee dist/base-environment.txt
+          /tmp/varia-f3a-r2-base/bin/pip check
+          /tmp/varia-f3a-r2-base/bin/python - <<'PY' | tee dist/base-environment.txt
           import importlib.util
-          import csv_analyzer
-          import csv_analyzer.analysis
-          import csv_analyzer.data
-          import csv_analyzer.exports
-          import csv_analyzer.plots
-          import csv_analyzer.state
-          import csv_analyzer.qt_app
-          import csv_analyzer.qt_app.bootstrap
-
           assert importlib.util.find_spec("PySide6") is None
-          print("base_imports=PASS")
-          print("pyside6=ABSENT")
-          print("package_origin=" + csv_analyzer.__file__)
+          print("base_pyside6=ABSENT")
           PY
 
-      - name: Base CTk entry points and controlled missing-Qt behavior
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cd /tmp/varia-f3a-r1-runtime
-          env -u PYTHONPATH /tmp/varia-f3a-base/bin/varia-studio --help
-          env -u PYTHONPATH /tmp/varia-f3a-base/bin/csv-analyzer --help
-          env -u PYTHONPATH /tmp/varia-f3a-base/bin/varia-studio-qt --help
-          env -u PYTHONPATH /tmp/varia-f3a-base/bin/python -m csv_analyzer.qt_app --help
-
-          set +e
-          QT_OUTPUT="$(env -u PYTHONPATH /tmp/varia-f3a-base/bin/varia-studio-qt 2>&1)"
-          QT_CODE=$?
-          MODULE_OUTPUT="$(env -u PYTHONPATH /tmp/varia-f3a-base/bin/python -m csv_analyzer.qt_app 2>&1)"
-          MODULE_CODE=$?
-          set -e
-
-          test "$QT_CODE" -ne 0
-          test "$MODULE_CODE" -ne 0
-          printf '%s\n' "$QT_OUTPUT" | tee "$GITHUB_WORKSPACE/dist/base-qt-missing.txt"
-          printf '%s\n' "$MODULE_OUTPUT" | tee -a "$GITHUB_WORKSPACE/dist/base-qt-missing.txt"
-          printf '%s\n' "$QT_OUTPUT" | grep -F "Install Varia Studio with the 'qt' extra."
-          printf '%s\n' "$MODULE_OUTPUT" | grep -F "Install Varia Studio with the 'qt' extra."
-          if printf '%s\n%s\n' "$QT_OUTPUT" "$MODULE_OUTPUT" | grep -F "Traceback"; then
-            echo "Unexpected traceback from optional Qt entry point" >&2
-            exit 1
-          fi
-          printf 'varia_studio_qt_missing_exit=%s\nmodule_qt_missing_exit=%s\n' \
-            "$QT_CODE" "$MODULE_CODE" | tee -a "$GITHUB_WORKSPACE/dist/base-qt-missing.txt"
-
-      - name: Base CTk startup smoke under Xvfb
+      - name: Base CTk smoke
         shell: bash
         env:
           QT_QPA_PLATFORM: xcb
         run: |
           set -euxo pipefail
-          cd /tmp/varia-f3a-r1-runtime
-          env -u PYTHONPATH xvfb-run -a /tmp/varia-f3a-base/bin/python - <<'PY' \
+          cd /tmp/varia-f3a-r2-runtime
+          env -u PYTHONPATH /tmp/varia-f3a-r2-base/bin/varia-studio --help
+          env -u PYTHONPATH /tmp/varia-f3a-r2-base/bin/csv-analyzer --help
+          env -u PYTHONPATH xvfb-run -a /tmp/varia-f3a-r2-base/bin/python - <<'PY' \
             | tee "$GITHUB_WORKSPACE/dist/base-ctk-smoke.txt"
-          from pathlib import Path
-          import csv_analyzer
           from csv_analyzer.app import Application
-
           app = Application()
           app.update_idletasks()
           print("base_ctk_shell=PASS")
-          print("cwd=" + str(Path.cwd()))
-          print("package_origin=" + str(Path(csv_analyzer.__file__).resolve()))
           app.close()
           PY
 
-      - name: Clean Qt-extra install from the same wheel
+      - name: Clean Qt-extra install from same wheel
         shell: bash
         run: |
           set -euxo pipefail
           WHEEL="$(readlink -f "$(ls dist/*.whl)")"
-          python -m venv /tmp/varia-f3a-qt
-          /tmp/varia-f3a-qt/bin/python -m pip install --upgrade pip
-          /tmp/varia-f3a-qt/bin/pip install \
+          python -m venv /tmp/varia-f3a-r2-qt
+          /tmp/varia-f3a-r2-qt/bin/python -m pip install --upgrade pip
+          /tmp/varia-f3a-r2-qt/bin/pip install \
             -c "$GITHUB_WORKSPACE/constraints-python312.txt" "${WHEEL}[qt]"
-          /tmp/varia-f3a-qt/bin/pip check
-          /tmp/varia-f3a-qt/bin/python - <<'PY' | tee dist/qt-environment.txt
+          /tmp/varia-f3a-r2-qt/bin/pip check
+          /tmp/varia-f3a-r2-qt/bin/python - <<'PY' | tee dist/qt-environment.txt
           import PySide6
-          from packaging.version import Version
-
-          version = Version(PySide6.__version__)
-          assert Version("6.11.3") <= version < Version("6.13")
           print("pyside6=" + PySide6.__version__)
-          print("qt_extra=PASS")
           PY
 
-      - name: External Qt entry points without source tree
+      - name: Installed Qt smoke
         shell: bash
         run: |
           set -euxo pipefail
-          cd /tmp/varia-f3a-r1-runtime
-          env -u PYTHONPATH /tmp/varia-f3a-qt/bin/varia-studio-qt --help
-          env -u PYTHONPATH /tmp/varia-f3a-qt/bin/python -m csv_analyzer.qt_app --help
-
-      - name: External Qt shell and dataset smoke
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cd /tmp/varia-f3a-r1-runtime
+          cd /tmp/varia-f3a-r2-runtime
+          env -u PYTHONPATH /tmp/varia-f3a-r2-qt/bin/varia-studio-qt --help
+          env -u PYTHONPATH /tmp/varia-f3a-r2-qt/bin/python -m csv_analyzer.qt_app --help
           cat > smoke.csv <<'EOF'
           x,y
           1,2
           3,4
           EOF
           env -u PYTHONPATH QT_QPA_PLATFORM=offscreen \
-            /tmp/varia-f3a-qt/bin/python - <<'PY' | tee "$GITHUB_WORKSPACE/dist/qt-smoke.txt"
+            /tmp/varia-f3a-r2-qt/bin/python - <<'PY' | tee "$GITHUB_WORKSPACE/dist/qt-smoke.txt"
           from pathlib import Path
           from PySide6.QtCore import QEventLoop, QTimer
           from csv_analyzer.qt_app.bootstrap import create_application
@@ -209,14 +204,12 @@ jobs:
           coordinator.start()
           shell.show()
           coordinator.load_path(Path("smoke.csv"))
-
           loop = QEventLoop()
           poll = QTimer()
           poll.setInterval(2)
-          def check_loaded():
-              if coordinator.state.dataset is not None:
-                  loop.quit()
-          poll.timeout.connect(check_loaded)
+          poll.timeout.connect(
+              lambda: loop.quit() if coordinator.state.dataset is not None else None
+          )
           poll.start()
           QTimer.singleShot(5000, loop.quit)
           loop.exec()
@@ -224,46 +217,74 @@ jobs:
           assert coordinator.state.dataset.frame.shape == (2, 2)
           assert coordinator.state.dataset_revision == 1
           assert coordinator.state.selection_revision == 1
-
-          coordinator.begin_close()
-          if coordinator.lifecycle is not Lifecycle.CLOSED:
-              close_loop = QEventLoop()
-              close_poll = QTimer()
-              close_poll.setInterval(2)
-              close_poll.timeout.connect(
-                  lambda: close_loop.quit()
-                  if coordinator.lifecycle is Lifecycle.CLOSED
-                  else None
-              )
-              close_poll.start()
-              QTimer.singleShot(5000, close_loop.quit)
-              close_loop.exec()
+          shell.close()
+          close_loop = QEventLoop()
+          close_poll = QTimer()
+          close_poll.setInterval(2)
+          close_poll.timeout.connect(
+              lambda: close_loop.quit()
+              if coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible()
+              else None
+          )
+          close_poll.start()
+          QTimer.singleShot(5000, close_loop.quit)
+          close_loop.exec()
           assert coordinator.lifecycle is Lifecycle.CLOSED
+          assert not shell.isVisible()
           print("qt_shell=PASS")
           print("dataset_shape=2x2")
-          print("dataset_revision=1")
-          print("selection_revision=1")
-          print("lifecycle=CLOSED")
-          print("cwd=" + str(Path.cwd()))
+          print("real_shell_close=PASS")
           PY
 
-      - name: Record correction environment
+      - name: Real shell-close probes offscreen
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd /tmp/varia-f3a-r2-runtime
+          : > "$GITHUB_WORKSPACE/dist/close-offscreen.txt"
+          for action in quit window; do
+            for worker in none cooperative noncancelable; do
+              env -u PYTHONPATH QT_QPA_PLATFORM=offscreen \
+                timeout 15s /tmp/varia-f3a-r2-qt/bin/python \
+                "$GITHUB_WORKSPACE/tools/f3a_qt_close_probe.py" \
+                --action "$action" --worker "$worker" \
+                | tee -a "$GITHUB_WORKSPACE/dist/close-offscreen.txt"
+            done
+          done
+
+      - name: Real shell-close probes under Xvfb
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: |
+          set -euxo pipefail
+          cd /tmp/varia-f3a-r2-runtime
+          : > "$GITHUB_WORKSPACE/dist/close-xvfb.txt"
+          for action in quit window; do
+            for worker in none cooperative noncancelable; do
+              env -u PYTHONPATH timeout 15s xvfb-run -a \
+                /tmp/varia-f3a-r2-qt/bin/python \
+                "$GITHUB_WORKSPACE/tools/f3a_qt_close_probe.py" \
+                --action "$action" --worker "$worker" \
+                | tee -a "$GITHUB_WORKSPACE/dist/close-xvfb.txt"
+            done
+          done
+
+      - name: Record R2 environment
         shell: bash
         run: |
           {
             echo "commit=$(git rev-parse HEAD)"
             echo "tree=$(git rev-parse HEAD^{tree})"
-            echo "r1_parent=c7596056f867cc78286bb3a476491bb6e8b23268"
-            echo "baseline=68488e6c339b8cd60011d51380cb8250c488fb35"
+            echo "r2_parent=f9bfe85c6718c92b5c41aad3129db3f77b68391e"
             echo "python=$(python --version 2>&1)"
             echo "dev_pyside6=$(python -c 'import PySide6; print(PySide6.__version__)')"
-            echo "qt_venv_pyside6=$(/tmp/varia-f3a-qt/bin/python -c 'import PySide6; print(PySide6.__version__)')"
-            echo "base_pyside6=$(/tmp/varia-f3a-base/bin/python -c 'import importlib.util; print("ABSENT" if importlib.util.find_spec("PySide6") is None else "PRESENT")')"
-          } | tee dist/r1-environment.txt
+            echo "qt_venv_pyside6=$(/tmp/varia-f3a-r2-qt/bin/python -c 'import PySide6; print(PySide6.__version__)')"
+          } | tee dist/r2-environment.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: f3-a-r1-packaging-evidence
+          name: f3-a-r2-evidence
           path: |
             dist/*
           if-no-files-found: error

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -99,7 +99,9 @@ class QtShell(QMainWindow):
         if self._allow_close:
             return
         self._allow_close = True
-        self.close()
+        # close_requested is emitted synchronously from closeEvent(). Defer the
+        # definitive close until that ignored event has fully unwound.
+        QTimer.singleShot(0, self.close)
 
     def closeEvent(self, event) -> None:
         if self._allow_close:
