@@ -305,8 +305,17 @@ class CoordinatorContractTests(unittest.TestCase):
         coordinator.start()
         self.assertEqual(coordinator.lifecycle, Lifecycle.RUNNING)
         self.assertEqual(shell.dataset_label.text(), "No dataset loaded")
-        coordinator.begin_close()
-        pump_until(lambda: coordinator.lifecycle is Lifecycle.CLOSED)
+
+        shell.show()
+        APP.processEvents()
+        shell.close()
+        pump_until(
+            lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible()
+        )
+
+        shell.deleteLater()
+        coordinator.deleteLater()
+        APP.processEvents()
 
     def test_callback_and_dataset_commit_run_on_gui_thread(self):
         coordinator, shell = self.make()
